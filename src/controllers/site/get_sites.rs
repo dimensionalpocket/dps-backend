@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::models::Site;
 use crate::services::GetAllSitesService;
 use crate::types::SiteError;
@@ -6,7 +6,7 @@ use crate::types::SiteError;
 pub struct GetSitesController;
 
 impl GetSitesController {
-  pub async fn run(databases: &Databases) -> Result<Vec<Site>, SiteError> {
+  pub async fn run(databases: &DpsBackendDatabases) -> Result<Vec<Site>, SiteError> {
     let main_pool = databases.main();
     let mut main_conn = main_pool
       .acquire()

@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::queries::users::{GetUserByIdQuery, UpdateUserData};
 use crate::services::{CheckUserPermissionService, UpdateUserService};
@@ -10,7 +10,7 @@ pub struct UpdateUserController;
 
 impl UpdateUserController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
     input: UpdateUserInput,

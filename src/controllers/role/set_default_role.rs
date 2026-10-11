@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::models::role::Role;
 use crate::queries::users::GetUserByIdQuery;
@@ -17,7 +17,7 @@ impl SetDefaultRoleController {
   /// - Verifies user has "can_manage_roles" permission
   /// - Sets the role with the given ID as default
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
     role_id: i64,

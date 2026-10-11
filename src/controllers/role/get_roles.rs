@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::models::role::Role;
 use crate::queries::users::GetUserByIdQuery;
@@ -15,7 +15,7 @@ impl GetRolesController {
   /// Validates that the user has either `can_manage_roles` OR `can_edit_user_role` permission
   /// before returning all roles.
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
   ) -> Result<Vec<Role>, RoleError> {

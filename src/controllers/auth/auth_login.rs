@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::services::{AuthLoginService, AuthResult, GenerateSessionCookieService};
 use crate::types::SessionError;
 use dps_config::DpsConfig;
@@ -7,7 +7,7 @@ pub struct AuthLoginController;
 
 impl AuthLoginController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     username: &str,
     password: &str,
     config: &DpsConfig,

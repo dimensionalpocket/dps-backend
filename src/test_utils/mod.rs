@@ -8,7 +8,7 @@
  */
 
 #[cfg(any(test, feature = "test-utils"))]
-use crate::database::{Databases, MainDatabase, SessionDatabase};
+use crate::database::{DpsBackendDatabases, MainDatabase, SessionDatabase};
 use crate::models::{Role, User};
 use crate::queries::roles::{CreateRoleData, CreateRoleQuery, GetDefaultRoleQuery};
 use crate::queries::users::{CreateUserData, CreateUserQuery};
@@ -36,26 +36,26 @@ pub fn create_test_dps_config() -> DpsConfig {
   config
 }
 
-pub async fn create_test_databases() -> (Databases, NamedTempFile, NamedTempFile) {
+pub async fn create_test_databases() -> (DpsBackendDatabases, NamedTempFile, NamedTempFile) {
   create_test_databases_with_config(true).await
 }
 
 pub async fn create_test_databases_with_pool_size(
   pool_size: u32,
-) -> (Databases, NamedTempFile, NamedTempFile) {
+) -> (DpsBackendDatabases, NamedTempFile, NamedTempFile) {
   create_test_databases_with_config_and_pool_size(true, pool_size).await
 }
 
 pub async fn create_test_databases_with_config(
   configure_sqlite: bool,
-) -> (Databases, NamedTempFile, NamedTempFile) {
+) -> (DpsBackendDatabases, NamedTempFile, NamedTempFile) {
   create_test_databases_with_config_and_pool_size(configure_sqlite, 1).await
 }
 
 pub async fn create_test_databases_with_config_and_pool_size(
   configure_sqlite: bool,
   pool_size: u32,
-) -> (Databases, NamedTempFile, NamedTempFile) {
+) -> (DpsBackendDatabases, NamedTempFile, NamedTempFile) {
   let main_temp_file = NamedTempFile::new().expect("Failed to create temp file");
   let main_sqlite_file_path = main_temp_file.path().display().to_string();
 
@@ -85,14 +85,14 @@ pub async fn create_test_databases_with_config_and_pool_size(
     .expect("Failed to create session test database");
   let session_pool = session_database.pool;
 
-  let databases = Databases::new(main_pool, session_pool);
+  let databases = DpsBackendDatabases::new(main_pool, session_pool);
 
   (databases, main_temp_file, session_temp_file)
 }
 
 /// Create a test user with default password
 pub async fn create_test_user_with_databases(
-  databases: &Databases,
+  databases: &DpsBackendDatabases,
   username: &str,
   role_id: i64,
 ) -> User {
@@ -112,7 +112,7 @@ pub async fn create_test_user_with_conn(
 
 /// Create a test user with custom password
 pub async fn create_test_user_with_databases_and_password(
-  databases: &Databases,
+  databases: &DpsBackendDatabases,
   username: &str,
   role_id: i64,
   password: &str,
@@ -134,7 +134,7 @@ pub async fn create_test_user_with_conn_and_password(
 
 /// Create a test user with all parameters
 pub async fn create_test_user_full_with_databases(
-  databases: &Databases,
+  databases: &DpsBackendDatabases,
   username: &str,
   role_id: Option<i64>,
   password: &str,
@@ -190,7 +190,7 @@ pub async fn create_test_user_full_with_conn(
 
 /// Create a test user with all parameters including specific UUID
 pub async fn create_test_user_with_databases_and_uuid(
-  databases: &Databases,
+  databases: &DpsBackendDatabases,
   uuid: &str,
   username: &str,
   role_id: Option<i64>,
@@ -256,7 +256,7 @@ pub async fn create_test_user_with_conn_and_uuid(
 
 /// Create a test role and return ID
 pub async fn create_test_role_with_databases(
-  databases: &Databases,
+  databases: &DpsBackendDatabases,
   name: &str,
   permissions: &[&str],
 ) -> i64 {
@@ -276,7 +276,7 @@ pub async fn create_test_role_with_conn(
 
 /// Create a test role and return full Role model
 pub async fn create_test_role_model_with_databases(
-  databases: &Databases,
+  databases: &DpsBackendDatabases,
   name: &str,
   permissions: &[&str],
   is_default: bool,

@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::services::{AuthRegisterService, GenerateSessionCookieService, RegisterResult};
 use crate::types::SessionError;
 use dps_config::DpsConfig;
@@ -7,7 +7,7 @@ pub struct AuthRegisterController;
 
 impl AuthRegisterController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     username: &str,
     password: &str,
     password_confirmation: &str,

@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::models::role::Role;
 use crate::queries::roles::CreateRoleData;
@@ -18,7 +18,7 @@ impl AddRoleController {
   /// - Verifies user has "can_manage_roles" permission
   /// - Creates role with is_default set to false
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
     create_data: CreateRoleData,

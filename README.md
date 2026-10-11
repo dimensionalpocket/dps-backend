@@ -18,6 +18,7 @@ graceful shutdown.
 - Password hashing with Argon2
 - SQLite database with migrations
 - Embeddable router: enhance any host `axum::Router` without owning the listener
+- Shared database handles exposed to the host for custom queries and data changes
 
 ## API Endpoints
 
@@ -159,6 +160,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+### Accessing the databases from the host
+
+The backend lazily creates and caches a single `DpsBackendDatabases` instance and shares it with the
+embedded router, so the host can borrow the exact same connection pools. Call `DpsBackend::databases()`
+to obtain a `&DpsBackendDatabases` and run your own queries — including inserts, updates, and deletes —
+against the main and session databases:
+
+```rust
+use dps_backend::DpsBackend;
+use dps_config::DpsConfig;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = DpsConfig::new();
+    let backend = DpsBackend::new(config)?;
+
+    // Lazily created on first call and cached; the same instance is used by
+    // `migrate_database()`, `seed_database()`, and `routes()`/`enhance()`.
+    let databases = backend.databases().await?;
+
+    // Acquire a connection from either pool.
+    let mut conn = databases.main().acquire().await?;
+    sqlx::query("UPDATE sites SET port = ? WHERE id = ?")
+        .bind(8443)
+        .bind(1)
+        .execute(&mut *conn)
+        .await?;
+
+    // Session data is available through `databases.session()`.
+    let _session_pool = databases.session();
+
+    let app = backend.enhance(axum::Router::new()).await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+```
+
+> Hosts that run raw SQL must add `sqlx` (with the `sqlite` feature) to their own dependencies. The
+> `DpsBackendDatabases` handle is `Clone` (cloning it clones the underlying pools), so it can be moved
+> into tasks and other threads. The library's own query and service modules are also public if you
+> prefer to reuse them with a connection acquired from the pool.
 
 ## Configuration
 

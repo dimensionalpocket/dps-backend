@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::models::role::ROLE_PERMISSIONS;
 use crate::queries::users::GetUserByIdQuery;
@@ -26,7 +26,7 @@ impl GetRolePermissionsController {
   /// * `Ok(Vec<String>)` - List of available role permissions (filtered by user's admin rights)
   /// * `Err(RoleError)` - Authentication or authorization error
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
   ) -> Result<Vec<String>, RoleError> {

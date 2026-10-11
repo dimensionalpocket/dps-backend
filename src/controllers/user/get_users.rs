@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::models::user::UserWithRole;
 use crate::queries::users::{GetAllUsersWithRolesQuery, GetUserByIdQuery};
@@ -11,7 +11,7 @@ pub struct GetUsersController;
 
 impl GetUsersController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
   ) -> Result<Vec<UserWithRole>, UserError> {

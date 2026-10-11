@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::services::AuthGetCurrentUserService;
 use crate::types::SessionError;
@@ -8,7 +8,7 @@ pub struct AuthMeController;
 
 impl AuthMeController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
   ) -> Result<Option<crate::services::AuthMeResult>, SessionError> {

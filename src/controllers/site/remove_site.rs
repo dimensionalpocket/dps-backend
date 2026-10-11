@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::queries::users::GetUserByIdQuery;
 use crate::services::{CheckUserPermissionService, DeleteSiteService};
@@ -10,7 +10,7 @@ pub struct RemoveSiteController;
 
 impl RemoveSiteController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
     site_id: i64,

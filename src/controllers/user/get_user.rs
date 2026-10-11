@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::models::user::UserWithRole;
 use crate::queries::users::{GetUserByIdQuery, GetUserByIdWithRoleQuery};
@@ -11,7 +11,7 @@ pub struct GetUserController;
 
 impl GetUserController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
     target_user_id: i64,

@@ -1,10 +1,11 @@
-use crate::database::{Databases, MainDatabase, SessionDatabase};
+use crate::database::{DpsBackendDatabases, MainDatabase, SessionDatabase};
 use axum::{
   middleware::from_fn,
   routing::{get, patch, post, put},
   Router,
 };
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use tower::ServiceBuilder;
 use tower_http::{
   cors::CorsLayer,
@@ -15,7 +16,7 @@ use tracing::Level;
 /// Shared state passed to every backend route.
 #[derive(Clone)]
 pub struct AppState {
-  pub databases: Databases,
+  pub databases: DpsBackendDatabases,
   pub config: Arc<dps_config::DpsConfig>,
 }
 
@@ -27,6 +28,7 @@ pub struct AppState {
 /// `{api_path}`-prefixed routes and their middleware.
 pub struct DpsBackend {
   pub(crate) config: Arc<dps_config::DpsConfig>,
+  databases: OnceCell<DpsBackendDatabases>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,7 +101,54 @@ impl DpsBackend {
 
     Ok(DpsBackend {
       config: Arc::new(dps_config),
+      databases: OnceCell::new(),
     })
+  }
+
+  /// Returns the shared [`DpsBackendDatabases`] instance used by the backend.
+  ///
+  /// The instance is created lazily on first use and cached, so the host and
+  /// the embedded router always share the exact same connection pools. Hosts
+  /// can borrow the returned handle to run their own queries (including data
+  /// modifications) against the main and session databases.
+  ///
+  /// # Example
+  ///
+  /// ```rust,no_run
+  /// use dps_backend::DpsBackend;
+  /// use dps_config::DpsConfig;
+  ///
+  /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+  /// let config = DpsConfig::new();
+  /// let backend = DpsBackend::new(config)?;
+  /// let databases = backend.databases().await?;
+  ///
+  /// let mut conn = databases.main().acquire().await?;
+  /// sqlx::query("SELECT 1").execute(&mut *conn).await?;
+  /// # Ok(())
+  /// # }
+  /// ```
+  pub async fn databases(&self) -> Result<&DpsBackendDatabases, DpsBackendError> {
+    self
+      .databases
+      .get_or_try_init(|| async {
+        let main_db = MainDatabase::new_with_pool_size(
+          &self.config.get_auth_api_sqlite_main_file_path(),
+          Some(self.config.get_auth_api_sqlite_main_pool_size() as u32),
+        )
+        .await
+        .map_err(|e| DpsBackendError::DatabaseError(e.to_string()))?;
+
+        let session_db = SessionDatabase::new_with_pool_size(
+          &self.config.get_auth_api_sqlite_session_file_path(),
+          Some(self.config.get_auth_api_sqlite_session_pool_size() as u32),
+        )
+        .await
+        .map_err(|e| DpsBackendError::DatabaseError(e.to_string()))?;
+
+        Ok(DpsBackendDatabases::new(main_db.pool, session_db.pool))
+      })
+      .await
   }
 
   /// Build the backend's own routes, generic over the host router's state type.
@@ -202,15 +251,15 @@ impl DpsBackend {
     Ok(router.merge(routes))
   }
 
-  /// Initialize database connection only (no migrations or seeds).
+  /// Returns a [`MainDatabase`] handle backed by the shared main connection
+  /// pool used by the backend (no migrations or seeds are run).
+  ///
   /// This method is public for test usage.
   pub async fn initialize_database(&self) -> Result<MainDatabase, DpsBackendError> {
-    MainDatabase::new_with_pool_size(
-      &self.config.get_auth_api_sqlite_main_file_path(),
-      Some(self.config.get_auth_api_sqlite_main_pool_size() as u32),
-    )
-    .await
-    .map_err(|e| DpsBackendError::DatabaseError(e.to_string()))
+    let databases = self.databases().await?;
+    Ok(MainDatabase {
+      pool: databases.main().clone(),
+    })
   }
 
   /// Run database migrations only.
@@ -232,16 +281,8 @@ impl DpsBackend {
   }
 
   async fn initialize_state(&self) -> Result<AppState, DpsBackendError> {
-    let main_db = self.initialize_database().await?;
-    let session_db = SessionDatabase::new_with_pool_size(
-      &self.config.get_auth_api_sqlite_session_file_path(),
-      Some(self.config.get_auth_api_sqlite_session_pool_size() as u32),
-    )
-    .await
-    .map_err(|e| DpsBackendError::DatabaseError(e.to_string()))?;
-
     Ok(AppState {
-      databases: Databases::new(main_db.pool, session_db.pool),
+      databases: self.databases().await?.clone(),
       config: self.config.clone(),
     })
   }
@@ -317,6 +358,45 @@ mod tests {
 
     assert!(backend.migrate_database().await.is_ok());
     assert!(backend.seed_database().await.is_ok());
+  }
+
+  #[dps_backend_db_test]
+  async fn test_databases_returns_cached_instance() {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+
+    let backend = create_test_backend(db_path);
+
+    let first = backend.databases().await.unwrap();
+    let second = backend.databases().await.unwrap();
+
+    assert!(std::ptr::eq(first, second));
+  }
+
+  #[dps_backend_db_test]
+  async fn test_databases_shared_with_backend() {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+
+    let backend = create_test_backend(db_path);
+
+    // A write through the host-facing handle...
+    let databases = backend.databases().await.unwrap();
+    sqlx::query("CREATE TABLE host_writes (id INTEGER PRIMARY KEY)")
+      .execute(databases.main())
+      .await
+      .unwrap();
+
+    // ...is visible through the backend's own main pool.
+    let main_db = backend.initialize_database().await.unwrap();
+    let table_count: i64 = sqlx::query_scalar(
+      "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'host_writes'",
+    )
+    .fetch_one(&main_db.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(table_count, 1);
   }
 
   #[dps_backend_db_test]

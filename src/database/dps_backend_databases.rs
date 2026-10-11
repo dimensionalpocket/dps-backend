@@ -5,12 +5,12 @@ use sqlx::SqlitePool;
 /// This is shared through the backend's `AppState` so all handlers and
 /// controllers can access all databases.
 #[derive(Clone)]
-pub struct Databases {
+pub struct DpsBackendDatabases {
   main: SqlitePool,
   session: SqlitePool,
 }
 
-impl Databases {
+impl DpsBackendDatabases {
   pub fn new(main: SqlitePool, session: SqlitePool) -> Self {
     Self { main, session }
   }
@@ -44,7 +44,7 @@ mod tests {
       .await
       .expect("Failed to create session database");
 
-    let databases = Databases::new(main_db.pool, session_db.pool);
+    let databases = DpsBackendDatabases::new(main_db.pool, session_db.pool);
 
     // Basic smoke checks that pools are usable.
     sqlx::query("SELECT 1")
@@ -69,7 +69,7 @@ mod tests {
       .await
       .expect("Failed to create session database");
 
-    let databases = Databases::new(main_db.pool, session_db.pool);
+    let databases = DpsBackendDatabases::new(main_db.pool, session_db.pool);
 
     sqlx::query("CREATE TABLE only_in_main (id INTEGER PRIMARY KEY)")
       .execute(databases.main())
@@ -97,7 +97,7 @@ mod tests {
       .await
       .expect("Failed to create session database");
 
-    let databases = Databases::new(main_db.pool, session_db.pool);
+    let databases = DpsBackendDatabases::new(main_db.pool, session_db.pool);
     let databases_2 = databases.clone();
 
     let handle_1 = tokio::spawn(async move {

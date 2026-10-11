@@ -1,4 +1,4 @@
-use crate::database::Databases;
+use crate::database::DpsBackendDatabases;
 use crate::middleware::session::SessionContext;
 use crate::queries::sites::GetSiteByIdQuery;
 use crate::queries::users::GetUserByIdQuery;
@@ -11,7 +11,7 @@ pub struct GetSiteController;
 
 impl GetSiteController {
   pub async fn run(
-    databases: &Databases,
+    databases: &DpsBackendDatabases,
     session_context: SessionContext,
     config: &DpsConfig,
     site_id: i64,

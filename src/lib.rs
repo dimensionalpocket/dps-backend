@@ -11,5 +11,5 @@ pub mod test_utils;
 pub mod types;
 pub mod utils;
 
-pub use database::MainDatabase;
+pub use database::{DpsBackendDatabases, MainDatabase};
 pub use dps_backend::{DpsBackend, DpsBackendError};
