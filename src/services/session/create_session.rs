@@ -85,14 +85,14 @@ impl CreateSessionService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::services::CreateUserService;
   use crate::test_utils::{create_test_dps_config, create_test_role_model_with_conn};
   use dps_auth_session::DpsAuthSession;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_success() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -110,7 +110,7 @@ mod tests {
     assert_eq!(payload.sub, user.id.to_string());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_blank_username() {
     let mut main_conn = main_pool.acquire().await.unwrap();
     let config = create_test_dps_config();
@@ -120,7 +120,7 @@ mod tests {
     assert!(result.unwrap_err().to_string().contains("User is blank"));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_whitespace_username() {
     let mut main_conn = main_pool.acquire().await.unwrap();
     let config = create_test_dps_config();
@@ -130,7 +130,7 @@ mod tests {
     assert!(result.unwrap_err().to_string().contains("User is blank"));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_blank_password() {
     let mut main_conn = main_pool.acquire().await.unwrap();
     let config = create_test_dps_config();
@@ -143,7 +143,7 @@ mod tests {
       .contains("Password is blank"));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_user_not_found() {
     let mut main_conn = main_pool.acquire().await.unwrap();
     let config = create_test_dps_config();
@@ -154,7 +154,7 @@ mod tests {
     assert!(result.unwrap_err().to_string().contains("User not found"));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_wrong_password() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -173,7 +173,7 @@ mod tests {
       .contains("Password does not match"));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_case_insensitive_username() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

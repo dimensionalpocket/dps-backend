@@ -1,12 +1,12 @@
-use dps_auth_api::middleware::session::SessionContext;
-use dps_auth_api::services::CreateSessionForUserService;
-use dps_auth_api::test_utils as test_utils;
-use dps_auth_api::test_utils::{
+use dps_auth_session::DpsAuthSession;
+use dps_backend::middleware::session::SessionContext;
+use dps_backend::services::CreateSessionForUserService;
+use dps_backend::test_utils;
+use dps_backend::test_utils::{
   create_test_role_model_with_databases, create_test_user_with_databases,
 };
-use dps_auth_api::utils::session_context_sub_to_user_id;
-use dps_auth_session::DpsAuthSession;
-use dps_auth_test_macros::dps_auth_db_test;
+use dps_backend::utils::session_context_sub_to_user_id;
+use dps_backend_test_macros::dps_backend_db_test;
 use dps_config::DpsConfig;
 
 /// Creates a DpsConfig with custom session functions that use a JSON sub format:
@@ -47,7 +47,7 @@ fn create_config_with_custom_session_functions() -> DpsConfig {
   config
 }
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_custom_session_user_to_sub_fn_generates_json_sub() {
   create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
   let user = create_test_user_with_databases(&databases, "testuser", 1).await;
@@ -65,7 +65,7 @@ async fn test_custom_session_user_to_sub_fn_generates_json_sub() {
   assert_eq!(sub_json["roles"][0].as_str(), Some("admin"));
 }
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_custom_session_sub_to_user_id_fn_extracts_user_id() {
   let config = create_config_with_custom_session_functions();
 
@@ -76,7 +76,7 @@ async fn test_custom_session_sub_to_user_id_fn_extracts_user_id() {
   })
   .to_string();
 
-  let payload = dps_auth_api::middleware::session::SessionPayload {
+  let payload = dps_backend::middleware::session::SessionPayload {
     sub: custom_sub,
     iat: 1000,
     exp: 2000,
@@ -87,7 +87,7 @@ async fn test_custom_session_sub_to_user_id_fn_extracts_user_id() {
   assert_eq!(user_id, 42);
 }
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_custom_session_functions_round_trip() {
   create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
   let user = create_test_user_with_databases(&databases, "roundtrip_user", 1).await;
@@ -111,11 +111,11 @@ async fn test_custom_session_functions_round_trip() {
   assert_eq!(extracted_user_id, user.id);
 }
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_custom_session_sub_to_user_id_fn_invalid_json_returns_error() {
   let config = create_config_with_custom_session_functions();
 
-  let payload = dps_auth_api::middleware::session::SessionPayload {
+  let payload = dps_backend::middleware::session::SessionPayload {
     sub: "not_json".to_string(),
     iat: 1000,
     exp: 2000,
@@ -127,11 +127,11 @@ async fn test_custom_session_sub_to_user_id_fn_invalid_json_returns_error() {
   assert!(result.unwrap_err().contains("Invalid JSON sub"));
 }
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_custom_session_sub_to_user_id_fn_missing_user_id_returns_error() {
   let config = create_config_with_custom_session_functions();
 
-  let payload = dps_auth_api::middleware::session::SessionPayload {
+  let payload = dps_backend::middleware::session::SessionPayload {
     sub: serde_json::json!({"roles": ["admin"]}).to_string(),
     iat: 1000,
     exp: 2000,

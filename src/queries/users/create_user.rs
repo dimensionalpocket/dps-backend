@@ -66,13 +66,13 @@ impl CreateUserQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::create_test_role_model_with_databases;
   use uuid::Uuid;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_success() {
     // Insert test role first
     let role =
@@ -103,7 +103,7 @@ mod tests {
     assert_eq!(user.created_ts, user.updated_ts);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_duplicate_uuid_fails() {
     // Insert test role first
     let role =
@@ -139,7 +139,7 @@ mod tests {
     assert!(result.is_err());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_invalid_role_id_fails() {
     let user_uuid = Uuid::new_v4().to_string();
     let create_data = CreateUserData {
@@ -155,7 +155,7 @@ mod tests {
     assert!(result.is_err()); // Should fail due to foreign key constraint
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_with_default_role() {
     // Insert test roles with one default
     create_test_role_model_with_databases(&databases, "admin", &["is_admin"], false).await;
@@ -185,7 +185,7 @@ mod tests {
     assert_eq!(user.role_id, default_role.id);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_with_explicit_role() {
     // Insert test roles with one default
     let admin_role =
@@ -212,7 +212,7 @@ mod tests {
     assert_eq!(user.role_id, admin_role_id); // Should have admin role, not default
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_no_default_role_fails() {
     // Insert test roles with no default
     create_test_role_model_with_databases(&databases, "admin", &["is_admin"], false).await;

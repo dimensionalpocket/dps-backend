@@ -32,10 +32,10 @@ impl CreateSiteService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_site_success() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -58,7 +58,7 @@ mod tests {
     assert_eq!(site.created_ts, site.updated_ts);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_site_slug_already_exists() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

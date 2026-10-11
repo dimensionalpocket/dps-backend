@@ -1,15 +1,13 @@
 [package]
-name = "dps-auth-api"
+name = "dps-backend"
 version = "0.1.0"
 edition = "2021"
 authors = ["Dimensional Pocket <dpauth@dimensionalpocket.com>"]
 
 [workspace]
-members = ["crates/dps-auth-test-macros"]
+members = ["crates/dps-backend-test-macros"]
 
 [dependencies]
-async-graphql = { version = "7.0", features = ["tracing"] }
-async-graphql-axum = "7.0"
 axum = "0.8"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -41,7 +39,7 @@ test-utils = []
 [dev-dependencies]
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
 urlencoding = "2.1"
-dps-auth-test-macros = { path = "crates/dps-auth-test-macros" }
+dps-backend-test-macros = { path = "crates/dps-backend-test-macros" }
 anyhow = "1.0"
 
 # Local development script
@@ -51,5 +49,5 @@ path = "scripts/run_local_server.rs"
 
 # Database migration and setup tool
 [[bin]]
-name = "dps-auth-api-migrate"
-path = "config/scripts/dps_auth_api_migrate.rs"
+name = "dps-backend-migrate"
+path = "config/scripts/dps_backend_migrate.rs"

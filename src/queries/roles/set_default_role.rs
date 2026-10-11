@@ -63,12 +63,12 @@ impl SetDefaultRoleQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::*;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_set_default_role_success() {
     // Create test roles
     let role1_id = create_test_role_with_databases(&databases, "role1", &[]).await;
@@ -109,7 +109,7 @@ mod tests {
     assert!(!role2_updated.is_default);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_set_default_role_atomic_behavior() {
     // Create test roles
     let role1_id = create_test_role_with_databases(&databases, "role1", &[]).await;
@@ -163,7 +163,7 @@ mod tests {
     assert_eq!(default_count, 1);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_set_default_role_not_found() {
     // Try to set non-existent role as default
     let mut main_conn = main_pool.acquire().await.unwrap();
@@ -172,7 +172,7 @@ mod tests {
     assert!(result.is_none());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_set_default_role_timestamp_update() {
     // Create test role
     let role_id = create_test_role_with_databases(&databases, "role1", &[]).await;

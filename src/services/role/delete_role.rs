@@ -29,14 +29,14 @@ impl DeleteRoleService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::queries::users::{CreateUserData, CreateUserQuery};
   use crate::services::role::create_role::CreateRoleService;
   use crate::services::role::get_role_by_id::GetRoleByIdService;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_delete_role_success() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -65,7 +65,7 @@ mod tests {
     assert!(result.is_none());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_delete_role_not_found() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -77,7 +77,7 @@ mod tests {
     }
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_delete_role_in_use() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

@@ -29,14 +29,14 @@ impl DeleteSiteQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::queries::sites::{CreateSiteData, CreateSiteQuery};
 
   use sqlx::Row;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_delete_site_success() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -75,7 +75,7 @@ mod tests {
     assert_eq!(count, 0);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_delete_site_not_found() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

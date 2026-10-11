@@ -56,7 +56,7 @@ impl UpdateUserPasswordQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::services::GeneratePasswordHashService;
@@ -64,7 +64,7 @@ mod tests {
     create_test_role_model_with_databases, create_test_user_full_with_databases,
   };
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_update_user_password_success() {
     // Setup: Create a user
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
@@ -98,7 +98,7 @@ mod tests {
     // Note: timestamp might be the same in fast test environments, so we just verify the update succeeded
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_update_user_password_nonexistent_user() {
     // Test: Try to update password for non-existent user
     let update_data = UpdateUserPasswordData {
@@ -112,7 +112,7 @@ mod tests {
     assert!(result.is_err());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_update_user_password_timestamp_increases() {
     // Setup: Create a user
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;

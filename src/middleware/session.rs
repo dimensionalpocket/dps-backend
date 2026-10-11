@@ -1,11 +1,9 @@
 use dps_auth_session::DpsAuthSession;
 
-// Re-export for backward compatibility
-use async_graphql::Context;
 use axum::{extract::Request, middleware::Next, response::Response};
 pub use dps_auth_session::DpsAuthSessionPayload as SessionPayload;
 
-/// Session context that gets attached to GraphQL requests
+/// Session context that gets attached to requests by the session middleware.
 #[derive(Debug, Clone)]
 pub struct SessionContext {
   pub payload: Option<SessionPayload>,
@@ -18,22 +16,6 @@ impl SessionContext {
 
   pub fn authenticated(&self) -> bool {
     self.payload.is_some()
-  }
-
-  /// Get session context from GraphQL context
-  ///
-  /// This method should always succeed since the session middleware always sets the context.
-  /// If the context is missing, it indicates a configuration error and returns an internal server error.
-  pub fn from_context<'a>(
-    ctx: &'a Context<'a>,
-  ) -> Result<&'a SessionContext, async_graphql::Error> {
-    match ctx.data_opt::<SessionContext>() {
-      Some(context) => Ok(context),
-      None => {
-        tracing::error!("Session context not available in GraphQL resolver - middleware may not be configured properly");
-        Err("Internal server error".into())
-      }
-    }
   }
 }
 

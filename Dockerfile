@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 WORKDIR /app
 
 # Copy both compiled binaries from builder
-COPY --from=builder /app/target/release/run_local_server /app/dps-auth-api
-COPY --from=builder /app/target/release/dps-auth-api-migrate /app/dps-auth-api-migrate
+COPY --from=builder /app/target/release/run_local_server /app/dps-backend
+COPY --from=builder /app/target/release/dps-backend-migrate /app/dps-backend-migrate
 
 # Copy database configuration (migrations, seeds, schema)
 COPY --from=builder /app/config/databases /app/config/databases

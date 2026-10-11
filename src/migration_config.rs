@@ -2,8 +2,8 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "dps-auth-api-migrate")]
-#[command(about = "Database migration and setup tool for dps-auth-api")]
+#[command(name = "dps-backend-migrate")]
+#[command(about = "Database migration and setup tool for dps-backend")]
 #[command(version)]
 pub struct CliArgs {
   /// Path to SQLite database file

@@ -243,7 +243,7 @@ impl SqliteDatabaseCore {
 
     let mut schema_sql = String::new();
     schema_sql.push_str("-- Database Schema Dump\n");
-    schema_sql.push_str("-- Generated automatically by dps-auth-api-migrate\n\n");
+    schema_sql.push_str("-- Generated automatically by dps-backend-migrate\n\n");
 
     for table_sql in tables {
       schema_sql.push_str(&table_sql);

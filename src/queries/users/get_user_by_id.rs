@@ -19,13 +19,13 @@ impl GetUserByIdQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::create_test_role_model_with_databases;
   use uuid::Uuid;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_id_found() {
     // Insert test role first
     let role =
@@ -62,7 +62,7 @@ mod tests {
     assert_eq!(user.metadata_json, Some("{\"test\": true}".to_string()));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_id_not_found() {
     let mut main_conn = main_pool.acquire().await.unwrap();
     let user = GetUserByIdQuery::run(&mut main_conn, 999).await.unwrap();

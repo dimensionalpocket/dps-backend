@@ -45,12 +45,12 @@ impl CreateUserService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::create_test_role_model_with_databases;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_success() {
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
 
@@ -68,7 +68,7 @@ mod tests {
     assert_eq!(user.created_ts, user.updated_ts);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_username_already_exists() {
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
 
@@ -85,7 +85,7 @@ mod tests {
     }
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_user_case_insensitive_username_check() {
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
 

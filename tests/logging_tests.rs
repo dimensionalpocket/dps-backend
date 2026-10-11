@@ -1,127 +1,75 @@
-use axum::{
-  body::Body,
-  http::{Request, StatusCode},
-  Router,
-};
-use dps_auth_api::dps_auth_api::DpsAuthApi;
-use dps_auth_api::test_utils;
-use dps_auth_api::test_utils::create_test_user_via_mutation;
-use dps_auth_test_macros::dps_auth_db_test;
-use dps_config::DpsConfig;
+use axum::{body::Body, http::Request, Router};
+use dps_backend::test_utils;
+use dps_backend::test_utils::create_test_user_via_api;
 use tower::ServiceExt;
 
-// Helper function to create app for logging tests
 async fn create_app() -> Router {
-  // Create temporary database file with unique name to avoid conflicts
-  let temp_file = tempfile::Builder::new()
-    .prefix(&format!(
-      "dps_auth_api_logging_test_{}_",
-      rand::random::<u32>()
-    ))
-    .suffix(".db")
-    .tempfile()
-    .expect("Failed to create temp file");
-  let db_path = temp_file
-    .path()
-    .to_str()
-    .expect("Failed to get temp file path");
-
-  let mut config = DpsConfig::new();
-  config.set_auth_api_session_secret(Some("a".repeat(32).as_str()));
-  config.set_auth_api_sqlite_main_file_path(db_path);
-  config.set_domain("dps.localhost");
-  config.set_api_path("api");
-  config.set_auth_api_insecure_cookie(true);
-  config.set_development_mode(true);
-  config.set_auth_api_sqlite_main_pool_size(Some(1));
-
-  let server = DpsAuthApi::new(config).unwrap();
-
-  // Run migrations and seeds for full database setup
-  server
-    .migrate_database()
-    .await
-    .expect("Failed to run migrations");
-  server.seed_database().await.expect("Failed to run seeds");
-
-  server.create_app().await.unwrap()
+  test_utils::create_test_app().await
 }
 
 // ===== PASSWORD LOGGING SECURITY TESTS =====
 
 #[tracing_test::traced_test]
-#[dps_auth_db_test]
+#[tokio::test]
 async fn test_auth_login_no_password_in_logs() {
   let app = create_app().await;
-
-  // Setup: Create a test user via GraphQL mutation
   let unique_username = format!("testuser_{}", rand::random::<u32>());
-  create_test_user_via_mutation(&app, &unique_username, "password123").await;
+  create_test_user_via_api(&app, &unique_username, "password123").await;
 
-  // Test: Call the login mutation with a distinct password
-  let query = format!(
-    r#"{{
-      "query": "mutation {{ authLogin(username: \"{unique_username}\", password: \"secret_password_123!\") {{ token user {{ id name }} message }} }}"
-    }}"#
-  );
+  let body = serde_json::json!({
+    "username": unique_username,
+    "password": "secret_password_123!",
+  });
 
   let response = app
     .clone()
     .oneshot(
       Request::builder()
         .method("POST")
-        .uri("/api/graphql")
+        .uri("/api/auth/login")
         .header("content-type", "application/json")
-        .body(Body::from(query))
+        .body(Body::from(body.to_string()))
         .unwrap(),
     )
     .await
     .unwrap();
 
-  // Verify: Should succeed
-  assert_eq!(response.status(), StatusCode::OK);
-
-  // The traced_test macro will capture logs and fail if password is found
-  // This test mainly ensures the instrumentation doesn't panic and the operation succeeds
+  // Login fails (wrong password) but must not leak the password into logs.
+  assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
 
 #[tracing_test::traced_test]
-#[dps_auth_db_test]
+#[tokio::test]
 async fn test_auth_register_no_password_in_logs() {
   let app = create_app().await;
-
-  // Test: Call the register mutation with distinct passwords
   let unique_username = format!("newuser_{}", rand::random::<u32>());
-  let query = format!(
-    r#"{{
-      "query": "mutation {{ authRegister(username: \"{unique_username}\", password: \"super_secret_pass_456\", passwordConfirmation: \"super_secret_pass_456\") {{ user {{ id uuid name }} message }} }}"
-    }}"#
-  );
+
+  let body = serde_json::json!({
+    "username": unique_username,
+    "password": "super_secret_pass_456",
+    "passwordConfirmation": "super_secret_pass_456",
+  });
 
   let response = app
     .clone()
     .oneshot(
       Request::builder()
         .method("POST")
-        .uri("/api/graphql")
+        .uri("/api/auth/register")
         .header("content-type", "application/json")
-        .body(Body::from(query))
+        .body(Body::from(body.to_string()))
         .unwrap(),
     )
     .await
     .unwrap();
 
-  // Verify: Should succeed
-  assert_eq!(response.status(), StatusCode::OK);
-
-  // The traced_test macro will capture logs and fail if password is found
-  // This test mainly ensures the instrumentation doesn't panic and the operation succeeds
+  assert_eq!(response.status(), axum::http::StatusCode::CREATED);
 }
 
 // ===== HTTP LOGGING TESTS (TraceLayer) =====
 
 #[tracing_test::traced_test]
-#[dps_auth_db_test]
+#[tokio::test]
 async fn test_http_logging_get_request_logged() {
   let app = create_app().await;
 
@@ -136,63 +84,30 @@ async fn test_http_logging_get_request_logged() {
     .await
     .unwrap();
 
-  assert_eq!(response.status(), StatusCode::OK);
-
-  // TraceLayer should log the GET request
-  // The traced_test macro captures logs for verification
+  assert_eq!(response.status(), axum::http::StatusCode::OK);
 }
 
 #[tracing_test::traced_test]
-#[dps_auth_db_test]
+#[tokio::test]
 async fn test_http_logging_post_request_logged() {
   let app = create_app().await;
-
-  let query = r#"{"query": "{ getServerTimestamp }"}"#;
 
   let response = app
     .oneshot(
       Request::builder()
         .method("POST")
-        .uri("/api/graphql")
-        .header("content-type", "application/json")
-        .body(Body::from(query))
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-  assert_eq!(response.status(), StatusCode::OK);
-
-  // TraceLayer should log the POST request
-  // The traced_test macro captures logs for verification
-}
-
-#[tracing_test::traced_test]
-#[dps_auth_db_test]
-async fn test_http_logging_graphql_get_request_logged() {
-  let app = create_app().await;
-
-  // Test GraphQL GET request (the main issue we're fixing)
-  let query = urlencoding::encode("{ getServerTimestamp }");
-  let response = app
-    .oneshot(
-      Request::builder()
-        .method("GET")
-        .uri(format!("/api/graphql?query={query}"))
+        .uri("/api/auth/logout")
         .body(Body::empty())
         .unwrap(),
     )
     .await
     .unwrap();
 
-  assert_eq!(response.status(), StatusCode::OK);
-
-  // TraceLayer should now log GraphQL GET requests (previously missing)
-  // The traced_test macro captures logs for verification
+  assert_eq!(response.status(), axum::http::StatusCode::OK);
 }
 
 #[tracing_test::traced_test]
-#[dps_auth_db_test]
+#[tokio::test]
 async fn test_http_logging_404_request_logged() {
   let app = create_app().await;
 
@@ -207,10 +122,7 @@ async fn test_http_logging_404_request_logged() {
     .await
     .unwrap();
 
-  assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-  // TraceLayer should log 404 requests
-  // The traced_test macro captures logs for verification
+  assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
 }
 
 // ===== SHUTDOWN SERVICE LOGGING TESTS =====
@@ -218,12 +130,10 @@ async fn test_http_logging_404_request_logged() {
 #[tracing_test::traced_test]
 #[test]
 fn test_log_shutdown_start_logs_correct_message() {
-  use dps_auth_api::services::LogShutdownStartService;
+  use dps_backend::services::LogShutdownStartService;
 
-  // Test that log_shutdown_start logs expected messages
   LogShutdownStartService::run("SIGTERM");
 
-  // Verify log messages were written
   assert!(logs_contain(
     "Starting graceful shutdown due to SIGTERM signal"
   ));
@@ -235,12 +145,10 @@ fn test_log_shutdown_start_logs_correct_message() {
 #[tracing_test::traced_test]
 #[test]
 fn test_log_shutdown_start_with_sigint() {
-  use dps_auth_api::services::LogShutdownStartService;
+  use dps_backend::services::LogShutdownStartService;
 
-  // Test with SIGINT signal
   LogShutdownStartService::run("SIGINT");
 
-  // Verify log messages were written
   assert!(logs_contain(
     "Starting graceful shutdown due to SIGINT signal"
   ));
@@ -252,12 +160,10 @@ fn test_log_shutdown_start_with_sigint() {
 #[tracing_test::traced_test]
 #[test]
 fn test_log_shutdown_start_with_custom_signal() {
-  use dps_auth_api::services::LogShutdownStartService;
+  use dps_backend::services::LogShutdownStartService;
 
-  // Test with a custom signal name
   LogShutdownStartService::run("TEST_SIGNAL");
 
-  // Verify log messages were written
   assert!(logs_contain(
     "Starting graceful shutdown due to TEST_SIGNAL signal"
   ));

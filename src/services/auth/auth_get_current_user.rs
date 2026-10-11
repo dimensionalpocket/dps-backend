@@ -46,7 +46,7 @@ impl AuthGetCurrentUserService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::middleware::session::SessionContext;
@@ -55,7 +55,7 @@ mod tests {
   };
   use dps_auth_session::DpsAuthSessionPayload;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_current_user_with_role() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

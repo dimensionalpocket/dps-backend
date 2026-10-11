@@ -40,13 +40,13 @@ impl AuthLoginService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::services::CreateUserService;
   use crate::test_utils::{create_test_dps_config, create_test_role_model_with_databases};
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_auth_login_success() {
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
     let mut main_conn = main_pool.acquire().await.unwrap();
@@ -63,7 +63,7 @@ mod tests {
     assert!(auth_result.user_id > 0);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_auth_login_invalid_credentials() {
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
     let mut main_conn = main_pool.acquire().await.unwrap();
@@ -76,7 +76,7 @@ mod tests {
     assert!(result.is_err());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_auth_login_user_not_found() {
     let mut main_conn = main_pool.acquire().await.unwrap();
     let config = create_test_dps_config();

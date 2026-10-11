@@ -17,15 +17,9 @@ use sqlx::SqliteConnection;
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
-// GraphQL test utilities
-use crate::middleware::session::SessionContext;
-use async_graphql::{Object, ObjectType, Schema};
 use dps_config::DpsConfig;
 
-// Re-export GraphQL test utilities for consistent usage
-pub use async_graphql::{EmptyMutation, EmptySubscription};
-
-/// Create a test DpsConfig for use in orchestrator and service tests
+/// Create a test DpsConfig for use in controller and service tests
 pub fn create_test_dps_config() -> DpsConfig {
   let mut config = DpsConfig::new();
   config.set_auth_api_port(Some(3000));
@@ -40,17 +34,6 @@ pub fn create_test_dps_config() -> DpsConfig {
   config.set_auth_api_sqlite_session_pool_size(Some(1));
   config.set_auth_api_session_ttl_seconds(Some(3600));
   config
-}
-
-// Centralized TestEmptyQuery to replace all duplicates
-#[derive(Default)]
-pub struct TestEmptyQuery;
-
-#[Object]
-impl TestEmptyQuery {
-  async fn dummy(&self) -> &str {
-    "test"
-  }
 }
 
 pub async fn create_test_databases() -> (Databases, NamedTempFile, NamedTempFile) {
@@ -318,8 +301,51 @@ pub async fn create_test_role_model_with_conn(
   CreateRoleQuery::run(main_conn, create_data).await.unwrap()
 }
 
-/// Create a test user via GraphQL mutation (for integration tests)
-pub async fn create_test_user_via_mutation(
+/// Build a fully-migrated, seeded backend router merged into a minimal host
+/// router. No TCP listener is opened.
+pub async fn create_test_app() -> axum::Router {
+  use crate::dps_backend::DpsBackend;
+  use axum::routing::get;
+
+  let temp_file = tempfile::Builder::new()
+    .prefix("dps_backend_test_")
+    .suffix(".db")
+    .tempfile()
+    .expect("Failed to create temp file");
+  let db_path = temp_file
+    .path()
+    .to_str()
+    .expect("Failed to get temp file path")
+    .to_string();
+  // Keep the temp file alive for the lifetime of the process; the backend
+  // opens its own connection pool against this path.
+  std::mem::forget(temp_file);
+
+  let mut config = create_test_dps_config();
+  config.set_auth_api_sqlite_main_file_path(&db_path);
+  config.set_auth_api_sqlite_session_file_path(":memory:");
+  config.set_domain("dps.localhost");
+
+  let backend = DpsBackend::new(config).expect("Failed to create test backend");
+  backend
+    .migrate_database()
+    .await
+    .expect("Failed to run migrations");
+  backend.seed_database().await.expect("Failed to run seeds");
+
+  let host = axum::Router::new()
+    .route("/", get(|| async { "OK" }))
+    .route("/health", get(|| async { "OK" }))
+    .fallback(|| async { (axum::http::StatusCode::NOT_FOUND, "NOT FOUND") });
+
+  backend
+    .enhance(host)
+    .await
+    .expect("Failed to build test app")
+}
+
+/// Create a test user through the REST registration endpoint.
+pub async fn create_test_user_via_api(
   app: &axum::Router,
   username: &str,
   password: &str,
@@ -330,102 +356,45 @@ pub async fn create_test_user_via_mutation(
   };
   use tower::ServiceExt;
 
-  let query = format!(
-    r#"{{
-        "query": "mutation {{ authRegister(username: \"{username}\", password: \"{password}\", passwordConfirmation: \"{password}\") {{ user {{ uuid name }} }} }}"
-      }}"#
-  );
+  let body = serde_json::json!({
+    "username": username,
+    "password": password,
+    "passwordConfirmation": password,
+  });
 
   let response = app
     .clone()
     .oneshot(
       Request::builder()
         .method("POST")
-        .uri("/api/graphql")
+        .uri("/api/auth/register")
         .header("content-type", "application/json")
-        .body(Body::from(query))
+        .body(Body::from(body.to_string()))
         .unwrap(),
     )
     .await
     .unwrap();
 
-  assert_eq!(response.status(), StatusCode::OK);
+  assert_eq!(response.status(), StatusCode::CREATED);
 
   let body = axum::body::to_bytes(response.into_body(), usize::MAX)
     .await
     .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-  let data: serde_json::Value = serde_json::from_str(&body_str).unwrap();
-
-  // Verify user creation was successful
-  assert!(data["errors"].is_null(), "User creation failed: {body_str}");
-  assert!(!data["data"]["authRegister"]["user"]["uuid"].is_null());
-
-  data["data"]["authRegister"]["user"]["uuid"]
+  let data: serde_json::Value = serde_json::from_slice(&body).unwrap();
+  data["user"]["uuid"]
     .as_str()
-    .unwrap()
+    .expect("Registration response missing uuid")
     .to_string()
-}
-
-// GraphQL test schema helper methods
-/// For query tests - pass query directly
-pub fn create_test_query_schema<Q>(
-  query: Q,
-  databases: Databases,
-  session: Option<SessionContext>,
-  config: Option<DpsConfig>,
-) -> Schema<Q, EmptyMutation, EmptySubscription>
-where
-  Q: ObjectType + 'static,
-{
-  let mut schema_builder = Schema::build(query, EmptyMutation, EmptySubscription);
-
-  schema_builder = schema_builder.data(databases.clone());
-
-  if let Some(session) = session {
-    schema_builder = schema_builder.data(session);
-  }
-
-  if let Some(config) = config {
-    schema_builder = schema_builder.data(std::sync::Arc::new(config));
-  }
-
-  schema_builder.finish()
-}
-
-/// For mutation tests - pass mutation directly
-pub fn create_test_mutation_schema<M>(
-  mutation: M,
-  databases: Databases,
-  session: Option<SessionContext>,
-  config: Option<DpsConfig>,
-) -> Schema<TestEmptyQuery, M, EmptySubscription>
-where
-  M: ObjectType + 'static,
-{
-  let mut schema_builder = Schema::build(TestEmptyQuery, mutation, EmptySubscription);
-
-  schema_builder = schema_builder.data(databases.clone());
-
-  if let Some(session) = session {
-    schema_builder = schema_builder.data(session);
-  }
-
-  if let Some(config) = config {
-    schema_builder = schema_builder.data(std::sync::Arc::new(config));
-  }
-
-  schema_builder.finish()
 }
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::models::ROLE_PERMISSIONS;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_user_no_role() {
     // Create user without role (will create and use default role automatically)
     let user =
@@ -446,7 +415,7 @@ mod tests {
     assert!(default_role.is_default);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_user_custom_password() {
     let role_id =
       create_test_role_with_databases(&databases, "test_role", &["can_view_user_self"]).await;
@@ -460,7 +429,7 @@ mod tests {
     assert_eq!(user.role_id, role_id);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_user_full() {
     let role_id =
       create_test_role_with_databases(&databases, "test_role", &["can_view_user_self"]).await;
@@ -481,7 +450,7 @@ mod tests {
     assert_eq!(user.metadata_json, Some(metadata.to_string()));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_role_id() {
     // Create role and get ID
     let role_id = create_test_role_with_databases(
@@ -494,7 +463,7 @@ mod tests {
     assert!(role_id > 0);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_role_model() {
     // Create role and get full model
     let role = create_test_role_model_with_databases(
@@ -512,7 +481,7 @@ mod tests {
     assert!(role.permissions.contains(&"can_list_users".to_string()));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_role_empty_permissions() {
     // Create role with no permissions
     let role = create_test_role_model_with_databases(&databases, "empty_role", &[], false).await;
@@ -522,7 +491,7 @@ mod tests {
     assert_eq!(role.permissions.len(), 0);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_role_all_permissions() {
     // Create role with all available permissions
     let role =
@@ -533,128 +502,7 @@ mod tests {
     assert_eq!(role.permissions.len(), ROLE_PERMISSIONS.len());
   }
 
-  // Tests for GraphQL schema helper methods
-  #[dps_auth_db_test]
-  async fn test_create_test_query_schema_no_context() {
-    use super::*;
-
-    let schema = create_test_query_schema(TestEmptyQuery, databases.clone(), None, None);
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_query_schema_with_pool() {
-    use super::*;
-
-    let schema = create_test_query_schema(TestEmptyQuery, databases.clone(), None, None);
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_query_schema_with_session() {
-    use super::*;
-
-    let session = SessionContext::new(None);
-    let schema = create_test_query_schema(TestEmptyQuery, databases.clone(), Some(session), None);
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_query_schema_with_config() {
-    use super::*;
-
-    let config = create_test_dps_config();
-    let schema = create_test_query_schema(TestEmptyQuery, databases.clone(), None, Some(config));
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_query_schema_all_context() {
-    use super::*;
-
-    let session = SessionContext::new(None);
-    let config = create_test_dps_config();
-
-    let schema = create_test_query_schema(
-      TestEmptyQuery,
-      databases.clone(),
-      Some(session),
-      Some(config),
-    );
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_mutation_schema_no_context() {
-    use super::*;
-
-    let schema = create_test_mutation_schema(EmptyMutation, databases.clone(), None, None);
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_mutation_schema_with_pool() {
-    use super::*;
-
-    let schema = create_test_mutation_schema(EmptyMutation, databases.clone(), None, None);
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_mutation_schema_with_session() {
-    use super::*;
-
-    let session = SessionContext::new(None);
-    let schema = create_test_mutation_schema(EmptyMutation, databases.clone(), Some(session), None);
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_mutation_schema_with_config() {
-    use super::*;
-
-    let config = create_test_dps_config();
-    let schema = create_test_mutation_schema(EmptyMutation, databases.clone(), None, Some(config));
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
-  async fn test_create_test_mutation_schema_all_context() {
-    use super::*;
-
-    let session = SessionContext::new(None);
-    let config = create_test_dps_config();
-
-    let schema = create_test_mutation_schema(
-      EmptyMutation,
-      databases.clone(),
-      Some(session),
-      Some(config),
-    );
-
-    // Verify schema was created successfully
-    assert!(schema.execute("{ dummy }").await.is_ok());
-  }
-
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_test_user_with_uuid_success() {
     use crate::queries::users::GetUserByUuidQuery;
 

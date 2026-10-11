@@ -19,13 +19,13 @@ impl GetUserByUuidQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::create_test_role_model_with_databases;
   use uuid::Uuid;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_uuid_found() {
     // Insert test role first
     let role =
@@ -61,7 +61,7 @@ mod tests {
     assert_eq!(user.metadata_json, None);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_uuid_not_found() {
     let user_uuid = Uuid::new_v4().to_string();
     let mut main_conn = main_pool.acquire().await.unwrap();

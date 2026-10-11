@@ -57,12 +57,12 @@ impl GetAllUsersWithRolesQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::create_test_role_model_with_databases;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_all_users_with_roles_empty() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -72,7 +72,7 @@ mod tests {
     assert_eq!(result.len(), 0);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_all_users_with_roles_with_data() {
     // Insert test roles
     let admin_role = create_test_role_model_with_databases(&databases, "admin", &[], false).await;
@@ -121,7 +121,7 @@ mod tests {
     assert_eq!(result[1].role.name, "user");
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_all_users_with_roles_joins_correctly() {
     // Insert test role
     let test_role =

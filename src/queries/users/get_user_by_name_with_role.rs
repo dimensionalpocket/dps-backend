@@ -71,12 +71,12 @@ impl GetUserByNameWithRoleQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::{create_test_role_with_databases, create_test_user_with_databases};
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_name_with_role_success() {
     // Create role and user
     let role_id =
@@ -97,7 +97,7 @@ mod tests {
     assert_eq!(user_with_role.user.role_id, role_id);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_name_with_role_not_found() {
     // Query non-existent user
     let mut main_conn = main_pool.acquire().await.unwrap();
@@ -108,7 +108,7 @@ mod tests {
     assert!(result.is_none());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_name_with_role_case_insensitive() {
     // Create role and user
     let role_id = create_test_role_with_databases(&databases, "user", &[]).await;
@@ -135,7 +135,7 @@ mod tests {
     assert_eq!(result_mixed.unwrap().role.name, "user");
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_user_by_name_with_role_permissions() {
     // Create role with permissions and user
     let role_id =

@@ -1,4 +1,5 @@
 pub mod database;
+pub mod http;
 pub mod password;
 pub mod role;
 pub mod session;
@@ -6,6 +7,7 @@ pub mod site;
 pub mod user;
 
 pub use database::Database;
+pub use http::*;
 pub use password::PasswordError;
 pub use role::RoleError;
 pub use session::SessionError;

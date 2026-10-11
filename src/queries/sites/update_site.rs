@@ -92,12 +92,12 @@ impl UpdateSiteQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::queries::sites::{CreateSiteData, CreateSiteQuery};
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_update_site_success() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -141,7 +141,7 @@ mod tests {
     assert_eq!(updated_site.created_ts, site.created_ts);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_update_site_partial_update() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -187,7 +187,7 @@ mod tests {
     assert!(updated_site.updated_ts > site.updated_ts);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_update_site_not_found() {
     let update_data = UpdateSiteData {
       id: 999,
@@ -205,7 +205,7 @@ mod tests {
     assert!(result.is_none());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_update_site_no_changes() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

@@ -32,12 +32,12 @@ impl GetAllRolesQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::test_utils::create_test_role_model_with_databases;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_all_roles_returns_default_roles() {
     // Insert test roles
     create_test_role_model_with_databases(&databases, "admin", &["is_admin"], false).await;
@@ -53,7 +53,7 @@ mod tests {
     assert!(roles[1].is_default);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_all_roles_empty_table() {
     let mut main_conn = main_pool.acquire().await.unwrap();
     let roles = GetAllRolesQuery::run(&mut main_conn).await.unwrap();

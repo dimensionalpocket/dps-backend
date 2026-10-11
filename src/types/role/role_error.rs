@@ -3,9 +3,9 @@
 pub enum RoleError {
   /// Database operation failed
   DatabaseError(sqlx::Error),
-  /// Authentication failed (used by orchestrators)
+  /// Authentication failed (used by controllers)
   AuthenticationError(String),
-  /// Authorization failed (used by orchestrators)
+  /// Authorization failed (used by controllers)
   AuthorizationError(String),
   /// Role not found
   RoleNotFound(i64),

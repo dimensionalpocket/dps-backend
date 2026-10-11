@@ -25,14 +25,14 @@ impl CreateSessionForUserService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::services::CreateUserService;
   use crate::test_utils::{create_test_dps_config, create_test_role_model_with_databases};
   use dps_auth_session::DpsAuthSession;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_for_user_success() {
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
 
@@ -53,7 +53,7 @@ mod tests {
     assert_eq!(payload.sub, user.id.to_string());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_create_session_for_user_different_users() {
     create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true).await;
 

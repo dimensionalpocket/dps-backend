@@ -43,7 +43,7 @@ jobs:
         context: .
         file: ./Dockerfile
         push: false
-        tags: dps-auth-api:test
+        tags: dps-backend:test
         load: true
         # Use GitHub Actions cache with better configuration
         cache-from: type=gha
@@ -55,14 +55,14 @@ jobs:
         platforms: linux/amd64
         
     - name: Test image exists
-      run: docker images dps-auth-api:test
+      run: docker images dps-backend:test
       
     - name: Start container and test API
       run: |
         # Start container in background with database migration and secret key
         docker run -d --name test-container -p 3000:3000 \
           -e DPS_AUTH_API_SESSION_SECRET="12345678901234567890123456789012" \
-          dps-auth-api:test
+          dps-backend:test
         
         # Wait for server to start and test health endpoint (max 30 seconds)
         echo "Waiting for server to start..."

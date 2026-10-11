@@ -22,12 +22,12 @@ impl GetSiteByIdQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::queries::sites::{CreateSiteData, CreateSiteQuery};
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_site_by_id_success() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -64,7 +64,7 @@ mod tests {
     assert!(site.updated_ts > 0);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_site_by_id_not_found() {
     // Test getting a non-existent site
     let mut main_conn = main_pool.acquire().await.unwrap();
@@ -73,7 +73,7 @@ mod tests {
     assert!(retrieved_site.is_none());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_site_by_id_empty_database() {
     // Test getting a site from empty database
     let mut main_conn = main_pool.acquire().await.unwrap();
@@ -82,7 +82,7 @@ mod tests {
     assert!(retrieved_site.is_none());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_site_by_id_multiple_sites() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -133,7 +133,7 @@ mod tests {
     assert_eq!(site2.metadata_json, Some("{\"type\": \"api\"}".to_string()));
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_site_by_id_with_null_fields() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

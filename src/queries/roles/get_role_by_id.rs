@@ -35,10 +35,10 @@ impl GetRoleByIdQuery {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_role_by_id_found() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 
@@ -60,7 +60,7 @@ mod tests {
     assert!(!role.is_default);
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_get_role_by_id_not_found() {
     let mut main_conn = main_pool.acquire().await.unwrap();
 

@@ -1,15 +1,15 @@
-use dps_auth_api::test_utils;
-use dps_auth_api::{
+use dps_backend::test_utils;
+use dps_backend::{
   queries::{
     roles::{GetAllRolesQuery, GetRoleByNameQuery},
     users::{CreateUserData, CreateUserQuery, GetUserByUuidQuery},
   },
   test_utils::{create_test_role_with_databases, create_test_user_full_with_databases},
 };
-use dps_auth_test_macros::dps_auth_db_test;
+use dps_backend_test_macros::dps_backend_db_test;
 use uuid::Uuid;
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_complete_user_creation_flow() {
   // Setup test database
 
@@ -52,7 +52,7 @@ async fn test_complete_user_creation_flow() {
   assert_eq!(retrieved_user.name, created_user.name);
 }
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_default_roles_seeded() {
   // Setup test database
 
@@ -71,7 +71,7 @@ async fn test_default_roles_seeded() {
   assert!(role_names.contains(&"user"));
 }
 
-#[dps_auth_db_test]
+#[dps_backend_db_test]
 async fn test_foreign_key_constraint_enforced() {
   // Setup test database
 

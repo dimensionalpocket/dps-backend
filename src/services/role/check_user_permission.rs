@@ -38,13 +38,13 @@ impl CheckUserPermissionService {
 
 #[cfg(test)]
 mod tests {
-  use dps_auth_test_macros::dps_auth_db_test;
+  use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
   use crate::models::user::User;
   use crate::test_utils::create_test_role_model_with_databases;
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_check_user_permission_admin_has_all_permissions() {
     let admin_role =
       create_test_role_model_with_databases(&databases, "admin", &["is_admin"], false).await;
@@ -79,7 +79,7 @@ mod tests {
     );
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_check_user_permission_regular_user_specific_permissions() {
     let user_role =
       create_test_role_model_with_databases(&databases, "user", &["can_view_user_self"], true)
@@ -116,7 +116,7 @@ mod tests {
     );
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_check_user_permission_user_with_no_role() {
     let user_no_role = User {
       id: 3,
@@ -137,7 +137,7 @@ mod tests {
     );
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_check_user_permission_invalid_permission() {
     let admin_role =
       create_test_role_model_with_databases(&databases, "admin", &["is_admin"], false).await;
@@ -174,7 +174,7 @@ mod tests {
     .unwrap());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_check_user_permission_valid_new_permissions() {
     let role = create_test_role_model_with_databases(
       &databases,
@@ -233,7 +233,7 @@ mod tests {
     .unwrap());
   }
 
-  #[dps_auth_db_test]
+  #[dps_backend_db_test]
   async fn test_check_user_permission_admin_bypasses_validation() {
     let admin_role =
       create_test_role_model_with_databases(&databases, "admin", &["is_admin"], false).await;

@@ -1,60 +1,92 @@
-# @dimensionalpocket/dps-auth-api
+# @dimensionalpocket/dps-backend
 
-[![Rust Tests](https://github.com/dimensionalpocket/dps-auth-api/actions/workflows/test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-auth-api/actions/workflows/test.yml) [![Docker Build Test](https://github.com/dimensionalpocket/dps-auth-api/actions/workflows/docker-build-test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-auth-api/actions/workflows/docker-build-test.yml)
+[![Rust Tests](https://github.com/dimensionalpocket/dps-backend/actions/workflows/test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-backend/actions/workflows/test.yml) [![Docker Build Test](https://github.com/dimensionalpocket/dps-backend/actions/workflows/docker-build-test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-backend/actions/workflows/docker-build-test.yml)
 
-An opinionated authentication, user management, and session handling GraphQL API.
+An opinionated authentication, user management, and session handling backend, exposed as an embeddable
+`axum` REST router.
 
-It is intended to be deployed as a microservice with a volume to house the SQLite databases.
+It is intended to be deployed as a microservice with a volume to house the SQLite databases, but it can
+also be embedded into a larger `axum` application. The library **never binds a socket**: it enhances a
+host-provided router with its own `{api_path}`-prefixed routes, and the host owns `axum::serve` and
+graceful shutdown.
 
 ## Features
 
-- GraphQL API with authentication mutations and queries
+- REST API with authentication, user, role, and site endpoints
 - User management with role-based permissions
 - Session token management with encrypted tokens
 - Password hashing with Argon2
 - SQLite database with migrations
-- REST endpoints for health checks
+- Embeddable router: enhance any host `axum::Router` without owning the listener
 
 ## API Endpoints
 
-- `GET /` - Root endpoint
-- `GET /health` - Health check
-- `GET {api_path}/graphql` - GraphQL playground (development mode only)
-- `POST {api_path}/graphql` - GraphQL API
+All routes are nested under `/{api_path}` (default `/api`). Requests and responses are JSON with
+camelCase field names. Errors use the envelope `{"error":"<message>"}`.
 
-## GraphQL Operations
+### System
 
-#### Queries
+| Method | Path | Auth | Request | Success |
+|--------|------|------|---------|---------|
+| `GET` | `{api_path}/server-timestamp` | none | — | `200 {"timestamp":"<ms>"}` |
 
-| Operation | Description |
-|-----------|-------------|
-| `serverTimestamp` | Get current server timestamp in milliseconds since Unix epoch. Returns timestamp (String). No authentication required. |
-| `authMe` | Get current authenticated user profile. Returns user { id (Int), uuid (String), name (String), role { id (String), name (String), permissions ([String]) }, createdTs (Int), updatedTs (Int) }, sessionIat (Int), sessionExp (Int). Requires valid session cookie. |
-| `site` | Get complete site details by ID (admin only). Returns id (Int!), slug (String), subdomain (String), port (Int), protocol (String), metadataJson (String), createdTs (Int), updatedTs (Int). Requires can_view_site_details permission. |
-| `sites` | List all sites in database. Returns array of [id (Int), slug (String), subdomain (String), port (Int), protocol (String)]. No authentication required. |
-| `user` | Get complete user details by ID (admin only). Returns id (Int!), uuid (String), name (String), role { id (String), name (String), permissions ([String]) }, createdTs (Int), updatedTs (Int). Requires can_view_user_details permission. |
-| `users` | List all users with role information (admin only). Returns array of [id (Int), uuid (String), name (String), role { id (String), name (String), permissions ([String]) }, createdTs (Int), updatedTs (Int)]. Requires can_list_users permission. |
-| `rolePermissions` | List all available role permissions. Returns array of permission strings. Requires can_manage_roles permission. |
-| `roles` | List all roles with permissions. Returns array of [id (Int), name (String), isDefault (Boolean), permissions ([String]), createdTs (Int), updatedTs (Int)]. Requires can_manage_roles OR can_edit_user_role permission. |
-| `role` | Get single role by ID. Returns id (Int!), name (String), isDefault (Boolean), permissions ([String]), createdTs (Int), updatedTs (Int). Requires can_manage_roles permission. |
+### Auth
 
-#### Mutations
+| Method | Path | Auth | Request body | Success |
+|--------|------|------|--------------|---------|
+| `POST` | `{api_path}/auth/register` | none | `{username,password,passwordConfirmation}` | `201 {user,message}` + `Set-Cookie` |
+| `POST` | `{api_path}/auth/login` | none | `{username,password}` | `200 {token,user,message}` + `Set-Cookie` |
+| `POST` | `{api_path}/auth/logout` | none | — | `200 {message}` + expired `Set-Cookie` |
+| `PATCH` | `{api_path}/auth/password` | session | `{currentPassword,newPassword,newPasswordConfirmation}` | `200 {message,updatedTs}` |
+| `GET` | `{api_path}/auth/me` | session | — | `200 {user,sessionIat,sessionExp}` / `401` |
 
-| Operation | Description |
-|-----------|-------------|
-| `authRegister` | Register new user account. Input: username (String!), password (String!), passwordConfirmation (String!). Returns: user { id (Int), uuid (String), name (String), role { id (String), name (String), permissions ([String]) }, createdTs (Int), updatedTs (Int) }, message (String). No authentication required. |
-| `authLogin` | Authenticate user and create session. Input: username (String!), password (String!). Returns: token (String), user { id (Int), name (String), role { id (String), name (String), permissions ([String]) } }, message (String). No authentication required (sets cookie). |
-| `authLogout` | Logout user by clearing session cookie. No input required. Returns: message (String). No authentication required. |
-| `authChangePassword` | Change password for authenticated user. Input: currentPassword (String!), newPassword (String!), newPasswordConfirmation (String!). Returns: message (String). Requires valid session cookie. |
-| `addSite` | Add new site to database. Input: slug (String!), subdomain (String), port (Int), protocol (String), metadataJson (String). Returns: id (Int), slug (String), subdomain (String), port (Int), protocol (String), metadataJson (String), createdTs (Int), updatedTs (Int). Requires can_create_site permission. |
-| `updateSite` | Update existing site. Input: id (Int!), slug (String), subdomain (String), port (Int), protocol (String), metadataJson (String). Returns: id (Int), slug (String), subdomain (String), port (Int), protocol (String), metadataJson (String), createdTs (Int), updatedTs (Int). Requires can_update_site permission. |
-| `removeSite` | Remove existing site. Input: siteId (Int!). Returns: id (Int), slug (String), subdomain (String), port (Int), protocol (String), metadataJson (String), createdTs (Int), updatedTs (Int). Requires can_delete_site permission. |
-| `deleteUser` | Delete existing user. Input: id (Int!). Returns: success (Boolean). Requires can_delete_user permission. |
-| `updateUser` | Update existing user. Input: id (Int!), name (String), roleId (Int), password (String), passwordConfirmation (String), metadataJson (String). Returns: id (Int), uuid (String), name (String), role { id (Int), name (String), permissions ([String]) }, metadataJson (String), createdTs (Int), updatedTs (Int). Requires can_edit_user permission. |
-| `addRole` | Create new role. Input: name (String!), permissions ([String]!). Returns: id (Int), name (String), isDefault (Boolean), permissions ([String]), createdTs (Int), updatedTs (Int). Requires can_manage_roles permission. |
-| `updateRole` | Update existing role. Input: id (Int!), name (String), permissions ([String]). Returns: id (Int), name (String), isDefault (Boolean), permissions ([String]), createdTs (Int), updatedTs (Int). Requires can_manage_roles permission. |
-| `setDefaultRole` | Set a role as the default role. Input: roleId (Int!). Returns: id (Int), name (String), isDefault (Boolean), permissions ([String]), createdTs (Int), updatedTs (Int). Requires can_manage_roles permission. |
-| `removeRole` | Delete existing role. Input: id (Int!). Returns: success (Boolean), id (Int), name (String). Requires can_manage_roles permission. |
+### Sites
+
+| Method | Path | Permission | Request body | Success |
+|--------|------|------------|--------------|---------|
+| `GET` | `{api_path}/sites` | none | — | `200 [site]` |
+| `GET` | `{api_path}/sites/{id}` | `can_view_site_details` | — | `200 site` |
+| `POST` | `{api_path}/sites` | `can_create_site` | `{slug,subdomain?,port?,protocol?,metadataJson?}` | `201 site` |
+| `PATCH` | `{api_path}/sites/{id}` | `can_update_site` | `{slug?,subdomain?,port?,protocol?,metadataJson?}` | `200 site` |
+| `DELETE` | `{api_path}/sites/{id}` | `can_delete_site` | — | `200 site` |
+
+### Users
+
+| Method | Path | Permission | Request body | Success |
+|--------|------|------------|--------------|---------|
+| `GET` | `{api_path}/users` | `can_list_users` | — | `200 [user]` |
+| `GET` | `{api_path}/users/{id}` | `can_view_user_details` | — | `200 user` |
+| `PATCH` | `{api_path}/users/{id}` | `can_edit_user` | `{name?,roleId?,password?,passwordConfirmation?,metadataJson?}` | `200 user` |
+| `DELETE` | `{api_path}/users/{id}` | `can_delete_user` | — | `200 {success:true}` |
+
+### Roles
+
+| Method | Path | Permission | Request body | Success |
+|--------|------|------------|--------------|---------|
+| `GET` | `{api_path}/roles` | `can_manage_roles` OR `can_edit_user_role` | — | `200 [role]` |
+| `GET` | `{api_path}/roles/{id}` | `can_manage_roles` | — | `200 role` |
+| `GET` | `{api_path}/role-permissions` | `can_manage_roles` | — | `200 [String]` |
+| `POST` | `{api_path}/roles` | `can_manage_roles` | `{name,permissions:[String]}` | `201 role` |
+| `PATCH` | `{api_path}/roles/{id}` | `can_manage_roles` | `{name?,permissions?}` | `200 role` |
+| `PUT` | `{api_path}/roles/{id}/default` | `can_manage_roles` | — | `200 role` |
+| `DELETE` | `{api_path}/roles/{id}` | `can_manage_roles` | — | `200 {success,id,name}` |
+
+### JSON shapes
+
+- `site`: `{id, slug, subdomain, port, protocol, metadataJson, createdTs, updatedTs}`
+- `user`: `{id, uuid, name, role:{id, name, permissions:[String]}, metadataJson, createdTs, updatedTs}`
+- `role`: `{id, name, isDefault, permissions:[String], createdTs, updatedTs}`
+
+### Error status codes
+
+| Domain error | Status |
+|---|---|
+| `ValidationError`, `InvalidPermission` | `400 Bad Request` |
+| `AuthenticationError`, invalid credentials, no session | `401 Unauthorized` |
+| `AuthorizationError` ("Forbidden") | `403 Forbidden` |
+| `SiteNotFound`, `UserNotFound`, `RoleNotFound` | `404 Not Found` |
+| `UsernameAlreadyExists`, `RoleNameAlreadyExists`, `SlugAlreadyExists`, `RoleInUse`, `SelfDeletion` | `409 Conflict` |
+| Database/configuration/internal errors | `500 Internal Server Error` |
 
 ## Installation
 
@@ -62,38 +94,52 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dps-auth-api = { git = "https://github.com/dimensionalpocket/dps-auth-api", tag = "0.1.0" }
+dps-backend = { git = "https://github.com/dimensionalpocket/dps-backend", tag = "0.1.0" }
 ```
 
 ## Usage
 
-### Quickstart (minimal example)
+### Quickstart (embeddable router)
 
 ```rust
-use dps_auth_api::DpsAuthApi;
+use axum::{routing::get, Router};
+use dps_backend::DpsBackend;
 use dps_config::DpsConfig;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // DpsConfig loads from environment variables automatically
-    // Requires DPS_AUTH_API_SESSION_SECRET to be set
+    // DpsConfig loads from environment variables automatically.
+    // Requires DPS_AUTH_API_SESSION_SECRET to be set.
     let config = DpsConfig::new();
-    let server = DpsAuthApi::new(config)?;
-    
-    server.start().await
+    let backend = DpsBackend::new(config)?;
+
+    // The host owns the listener, root, health check, fallback, and graceful shutdown.
+    let host = Router::new()
+        .route("/", get(|| async { "OK" }))
+        .route("/health", get(|| async { "OK" }));
+
+    let app = backend.enhance(host).await?;
+
+    let listener = TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 ```
+
+> Embedders must not define their own routes under the backend's `{api_path}` namespace, since merging
+> overlapping routes panics.
 
 ### Full example (complete configuration)
 
 ```rust
-use dps_auth_api::DpsAuthApi;
+use dps_backend::DpsBackend;
 use dps_config::DpsConfig;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = DpsConfig::new();
-    
+
     // Override defaults
     config.set_auth_api_port(Some(3000));
     config.set_auth_api_sqlite_main_file_path("data/production.db");
@@ -102,26 +148,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.set_auth_api_insecure_cookie(false);
     config.set_development_mode(false);
     config.set_auth_api_sqlite_main_pool_size(Some(10));
-    
-    let server = DpsAuthApi::new(config)?;
-    
-    server.start().await
+
+    let backend = DpsBackend::new(config)?;
+
+    // `backend.routes::<()>().await?` returns just the `{api_path}` routes if you
+    // prefer to merge them yourself, or use `backend.enhance(host).await?`.
+    let app = backend.enhance(axum::Router::new()).await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 ```
 
-
 ## Configuration
 
-The `DpsAuthApi` uses `DpsConfig` from the `dps-config` crate for configuration management.
+The `DpsBackend` uses `DpsConfig` from the `dps-config` crate for configuration management.
 
 ### Environment Variables
 
 All configuration is loaded from environment variables via `DpsConfig::new()`:
 
 - `DPS_DOMAIN`: Base domain (default: "dps.localhost")
-- `DPS_API_PATH`: API path, without leading slash (default: "api", meaning DpsAuthApi serves at "/api/graphql")
-- `DPS_DEVELOPMENT_MODE`: Set to "Y" to enable development features like GraphQL playground (default: not defined)
-- `DPS_AUTH_API_PORT`: Server port (default: 3000 if not set)
+- `DPS_API_PATH`: API path, without leading slash (default: "api", meaning the backend serves at "/api")
+- `DPS_DEVELOPMENT_MODE`: Set to "Y" to enable development features (default: not defined)
+- `DPS_AUTH_API_PORT`: Server port used by the example host binary (default: 3000 if not set)
 - `DPS_AUTH_API_SQLITE_MAIN_FILE_PATH`: SQLite database file path (default: "data/main-development.db")
 - `DPS_AUTH_API_SQLITE_MAIN_POOL_SIZE`: Database connection pool size (default: 1)
 - `DPS_AUTH_API_SESSION_SECRET`: 32-byte secret for session encryption (required)
@@ -130,58 +180,61 @@ All configuration is loaded from environment variables via `DpsConfig::new()`:
 The cookie domain is automatically derived as `.{domain}` (e.g., ".dps.localhost").
 The cookie path is set to the `api_path` configuration with a leading slash (e.g., "/api").
 
-### Manual Configuration
+> `DpsConfig` is an external crate and exposes `auth_api_*` getters and `DPS_AUTH_API_*` environment
+> variables; those names are intentionally unchanged by this project.
 
-You can also set configuration programmatically:
+### Manual Configuration
 
 ```rust
 let mut config = DpsConfig::new();
 config.set_auth_api_port(Some(8080));
 config.set_domain("example.com");
 config.set_auth_api_sqlite_main_pool_size(Some(10));
-let server = DpsAuthApi::new(config)?;
+let backend = DpsBackend::new(config)?;
 ```
 
 All configuration options except `auth_api_session_secret` have sensible defaults and are optional.
 
 ## Local Development
 
-For local development, set the environment variables (see the "Environment Variables" section) and run the provided binary:
+For local development, set the environment variables (see the "Environment Variables" section) and run
+the example host binary:
 
 ```bash
 # Set environment variables in .env file, then:
 cargo run --bin run_local_server
 ```
 
-**Note**: When using the library directly in your code, use the `DpsAuthApi::new(config)` pattern instead.
+The example host (`scripts/run_local_server.rs`) owns `GET /`, `GET /health`, the fallback handler,
+`axum::serve`, and graceful shutdown.
 
 ## Database Setup
 
-The library provides a `dps-auth-api-migrate` binary for database setup and rollback.
+The library provides a `dps-backend-migrate` binary for database setup and rollback.
 
 ### Forward Migrations
 
-- Build (debug): `cargo build --bin dps-auth-api-migrate`
-- Build (release): `cargo build --release --bin dps-auth-api-migrate`
-- Run migrations (development): `cargo run --bin dps-auth-api-migrate`
-- Run with custom SQLite file: `cargo run --bin dps-auth-api-migrate -- --sqlite-file ./my-auth.db`
-- Production: `./target/release/dps-auth-api-migrate --sqlite-file ./production.db`
+- Build (debug): `cargo build --bin dps-backend-migrate`
+- Build (release): `cargo build --release --bin dps-backend-migrate`
+- Run migrations (development): `cargo run --bin dps-backend-migrate`
+- Run with custom SQLite file: `cargo run --bin dps-backend-migrate -- --sqlite-file ./my-auth.db`
+- Production: `./target/release/dps-backend-migrate --sqlite-file ./production.db`
 
 ### Migration Rollback
 
 Rollback the last migration:
 ```bash
-cargo run --bin dps-auth-api-migrate -- --revert
+cargo run --bin dps-backend-migrate -- --revert
 ```
 
 Rollback multiple migrations:
 ```bash
-cargo run --bin dps-auth-api-migrate -- --revert 3
+cargo run --bin dps-backend-migrate -- --revert 3
 ```
 
 Rollback in production:
 ```bash
-./target/release/dps-auth-api-migrate --sqlite-file ./production.db --revert
+./target/release/dps-backend-migrate --sqlite-file ./production.db --revert
 ```
 
 **Important**: Rollback will automatically regenerate the schema dump after reverting migrations.
