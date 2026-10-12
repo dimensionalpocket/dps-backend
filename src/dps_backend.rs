@@ -240,9 +240,10 @@ impl DpsBackend {
 
   /// Enhance a host-provided router with the backend routes.
   ///
-  /// The host is responsible for binding and serving the returned router. It
-  /// must not define routes under the backend's `{api_path}` namespace, since
-  /// merging overlapping routes panics.
+  /// The host is responsible for binding and serving the returned router. The
+  /// host may add its own routes under the backend's `{api_path}` namespace
+  /// (for example, to share the session cookie) as long as it does not redefine
+  /// an exact backend method + path, which panics on merge.
   pub async fn enhance<S>(&self, router: Router<S>) -> Result<Router<S>, DpsBackendError>
   where
     S: Clone + Send + Sync + 'static,

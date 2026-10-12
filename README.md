@@ -128,8 +128,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-> Embedders must not define their own routes under the backend's `{api_path}` namespace, since merging
-> overlapping routes panics.
+> Embedders may add their own routes under the backend's `{api_path}` namespace, as long as they do not
+> redefine an exact backend method + path (e.g. a duplicate `GET /api/auth/me`), which panics on merge.
+> Distinct paths merge cleanly. See
+> [Mounting host routes under the API path](#mounting-host-routes-under-the-api-path).
 
 ### Full example (complete configuration)
 
@@ -203,6 +205,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 > `DpsBackendDatabases` handle is `Clone` (cloning it clones the underlying pools), so it can be moved
 > into tasks and other threads. The library's own query and service modules are also public if you
 > prefer to reuse them with a connection acquired from the pool.
+
+### Mounting host routes under the API path
+
+The session cookie is issued with `Path=/{api_path}` (e.g. `/api`) and `Domain=.{domain}`, so browsers
+only send it to requests under that path. If the host app needs its own routes to receive — and
+validate — the same session cookie, mount them under the backend's `{api_path}` and apply the backend's
+session middleware to them.
+
+Two rules keep the host and backend stacks fully isolated:
+
+- Apply your own layers to your routes **before** calling `backend.enhance(...)`. `Router::layer` only
+  affects routes registered before the call, and `enhance` merges the backend routes afterwards, so host
+  layers never wrap backend routes and backend layers never wrap host routes.
+- Do not redefine an exact backend method + path. Distinct paths under `{api_path}` merge cleanly; an
+  exact duplicate panics.
+
+Use `DpsConfig::get_api_path()` for the mount prefix and `create_session_middleware` (public) for the
+middleware. `DpsConfig` is not `Clone`, so read both values before moving the config into
+`DpsBackend::new`.
+
+```rust
+use axum::{extract::Extension, middleware::from_fn, routing::get, Router};
+use dps_backend::middleware::session::{create_session_middleware, SessionContext};
+use dps_backend::DpsBackend;
+use dps_config::DpsConfig;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = DpsConfig::new();
+
+    // Read the values the host needs before the config is moved into the backend.
+    let session_secret = config
+        .get_backend_session_secret_bytes()
+        .expect("DPS_BACKEND_SESSION_SECRET must be set");
+    let api_path = format!("/{}", config.get_api_path());
+
+    let backend = DpsBackend::new(config)?;
+
+    // Host-owned routes under the same namespace, with their own session middleware.
+    let host_api = Router::new()
+        .route("/profile", get(host_profile))
+        .layer(from_fn(create_session_middleware(session_secret)));
+
+    let host = Router::new()
+        .route("/", get(|| async { "OK" }))
+        .route("/health", get(|| async { "OK" }))
+        .nest(&api_path, host_api);
+
+    // Host layers are applied before this merge, keeping the two stacks separate.
+    let app = backend.enhance(host).await?;
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn host_profile(
+    Extension(session): Extension<SessionContext>,
+) -> &'static str {
+    if session.authenticated() {
+        "profile"
+    } else {
+        "anonymous"
+    }
+}
+```
+
+> Host handlers can extract `Extension<SessionContext>` to read the validated session, exactly like the
+> backend's own handlers. The middleware is built from the same secret; creating a second instance is
+> intentional and cheap (the secret is a 32-byte copy).
 
 ## Configuration
 
