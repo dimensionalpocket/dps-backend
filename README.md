@@ -111,7 +111,7 @@ use tokio::net::TcpListener;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // DpsConfig loads from environment variables automatically.
-    // Requires DPS_AUTH_API_SESSION_SECRET to be set.
+    // Requires DPS_BACKEND_SESSION_SECRET to be set.
     let config = DpsConfig::new();
     let backend = DpsBackend::new(config)?;
 
@@ -142,13 +142,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = DpsConfig::new();
 
     // Override defaults
-    config.set_auth_api_port(Some(3000));
-    config.set_auth_api_sqlite_main_file_path("data/production.db");
-    config.set_auth_api_session_secret(Some("your-32-byte-secret-here!!!!"));
+    config.set_backend_port(Some(3000));
+    config.set_backend_sqlite_main_file_path("data/production.db");
+    config.set_backend_session_secret(Some("your-32-byte-secret-here!!!!"));
     config.set_domain("yourdomain.com");
-    config.set_auth_api_insecure_cookie(false);
+    config.set_backend_insecure_cookie(false);
     config.set_development_mode(false);
-    config.set_auth_api_sqlite_main_pool_size(Some(10));
+    config.set_backend_sqlite_main_pool_size(Some(10));
 
     let backend = DpsBackend::new(config)?;
 
@@ -215,29 +215,29 @@ All configuration is loaded from environment variables via `DpsConfig::new()`:
 - `DPS_DOMAIN`: Base domain (default: "dps.localhost")
 - `DPS_API_PATH`: API path, without leading slash (default: "api", meaning the backend serves at "/api")
 - `DPS_DEVELOPMENT_MODE`: Set to "Y" to enable development features (default: not defined)
-- `DPS_AUTH_API_PORT`: Server port used by the example host binary (default: 3000 if not set)
-- `DPS_AUTH_API_SQLITE_MAIN_FILE_PATH`: SQLite database file path (default: "data/main-development.db")
-- `DPS_AUTH_API_SQLITE_MAIN_POOL_SIZE`: Database connection pool size (default: 1)
-- `DPS_AUTH_API_SESSION_SECRET`: 32-byte secret for session encryption (required)
-- `DPS_AUTH_API_INSECURE_COOKIE`: Set to "Y" to enable insecure cookies (default: false)
+- `DPS_BACKEND_PORT`: Server port used by the example host binary (default: 3000 if not set)
+- `DPS_BACKEND_SQLITE_MAIN_FILE_PATH`: SQLite database file path (default: "data/main-development.db")
+- `DPS_BACKEND_SQLITE_MAIN_POOL_SIZE`: Database connection pool size (default: 1)
+- `DPS_BACKEND_SESSION_SECRET`: 32-byte secret for session encryption (required)
+- `DPS_BACKEND_INSECURE_COOKIE`: Set to "Y" to enable insecure cookies (default: false)
 
 The cookie domain is automatically derived as `.{domain}` (e.g., ".dps.localhost").
 The cookie path is set to the `api_path` configuration with a leading slash (e.g., "/api").
 
-> `DpsConfig` is an external crate and exposes `auth_api_*` getters and `DPS_AUTH_API_*` environment
-> variables; those names are intentionally unchanged by this project.
+> `DpsConfig` is an external crate and exposes `backend_*` getters and `DPS_BACKEND_*` environment
+> variables.
 
 ### Manual Configuration
 
 ```rust
 let mut config = DpsConfig::new();
-config.set_auth_api_port(Some(8080));
+config.set_backend_port(Some(8080));
 config.set_domain("example.com");
-config.set_auth_api_sqlite_main_pool_size(Some(10));
+config.set_backend_sqlite_main_pool_size(Some(10));
 let backend = DpsBackend::new(config)?;
 ```
 
-All configuration options except `auth_api_session_secret` have sensible defaults and are optional.
+All configuration options except `backend_session_secret` have sensible defaults and are optional.
 
 ## Local Development
 
@@ -290,8 +290,8 @@ Docker note:
 
 1. **Environment Variables**:
 ```bash
-export DPS_AUTH_API_SQLITE_FILE="data/development.db"
-export DPS_AUTH_API_MIGRATE_SKIP_SEEDS="false"
+export DPS_BACKEND_SQLITE_FILE="data/development.db"
+export DPS_BACKEND_MIGRATE_SKIP_SEEDS="false"
 ```
 
 2. **Command-line Arguments**:

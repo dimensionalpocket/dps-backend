@@ -80,15 +80,15 @@ impl DpsBackend {
   ///
   /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
   /// let mut config = DpsConfig::new();
-  /// config.set_auth_api_session_secret(Some("a".repeat(32).as_str()));
+  /// config.set_backend_session_secret(Some("a".repeat(32).as_str()));
   /// let backend = DpsBackend::new(config)?;
   /// # Ok(())
   /// # }
   /// ```
   pub fn new(dps_config: dps_config::DpsConfig) -> Result<Self, DpsBackendError> {
-    let session_secret = dps_config.get_auth_api_session_secret_bytes().ok_or(
+    let session_secret = dps_config.get_backend_session_secret_bytes().ok_or(
       DpsBackendError::MissingRequiredConfig {
-        field: "auth_api_session_secret".to_string(),
+        field: "backend_session_secret".to_string(),
       },
     )?;
 
@@ -133,15 +133,15 @@ impl DpsBackend {
       .databases
       .get_or_try_init(|| async {
         let main_db = MainDatabase::new_with_pool_size(
-          &self.config.get_auth_api_sqlite_main_file_path(),
-          Some(self.config.get_auth_api_sqlite_main_pool_size() as u32),
+          &self.config.get_backend_sqlite_main_file_path(),
+          Some(self.config.get_backend_sqlite_main_pool_size() as u32),
         )
         .await
         .map_err(|e| DpsBackendError::DatabaseError(e.to_string()))?;
 
         let session_db = SessionDatabase::new_with_pool_size(
-          &self.config.get_auth_api_sqlite_session_file_path(),
-          Some(self.config.get_auth_api_sqlite_session_pool_size() as u32),
+          &self.config.get_backend_sqlite_session_file_path(),
+          Some(self.config.get_backend_sqlite_session_pool_size() as u32),
         )
         .await
         .map_err(|e| DpsBackendError::DatabaseError(e.to_string()))?;
@@ -162,9 +162,9 @@ impl DpsBackend {
     let state = self.initialize_state().await?;
     let api_path = format!("/{}", self.config.get_api_path());
 
-    let session_secret = self.config.get_auth_api_session_secret_bytes().ok_or(
+    let session_secret = self.config.get_backend_session_secret_bytes().ok_or(
       DpsBackendError::MissingRequiredConfig {
-        field: "auth_api_session_secret".to_string(),
+        field: "backend_session_secret".to_string(),
       },
     )?;
 
@@ -302,8 +302,8 @@ mod tests {
 
   fn create_test_backend(db_path: &str) -> DpsBackend {
     let mut config = dps_config::DpsConfig::new();
-    config.set_auth_api_session_secret(Some("a".repeat(32).as_str()));
-    config.set_auth_api_sqlite_main_file_path(db_path);
+    config.set_backend_session_secret(Some("a".repeat(32).as_str()));
+    config.set_backend_sqlite_main_file_path(db_path);
     config.set_api_path("api");
     DpsBackend::new(config).unwrap()
   }
@@ -321,7 +321,7 @@ mod tests {
   #[test]
   fn test_new_invalid_secret_length() {
     let mut config = dps_config::DpsConfig::new();
-    config.set_auth_api_session_secret(Some("short"));
+    config.set_backend_session_secret(Some("short"));
     let result = DpsBackend::new(config);
     assert!(matches!(
       result,

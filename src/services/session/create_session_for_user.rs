@@ -14,7 +14,7 @@ impl CreateSessionForUserService {
       .map_err(|e| SessionError::AuthenticationError(e.to_string()))?;
 
     let payload = DpsAuthSession::create_payload(sub, None);
-    let secret = config.get_auth_api_session_secret_bytes().ok_or_else(|| {
+    let secret = config.get_backend_session_secret_bytes().ok_or_else(|| {
       SessionError::ConfigurationError("Session secret not configured".to_string())
     })?;
     let token = DpsAuthSession::encode_token(&payload, &secret)?;
@@ -48,7 +48,7 @@ mod tests {
 
     assert!(!token.is_empty());
 
-    let secret = config.get_auth_api_session_secret_bytes().unwrap();
+    let secret = config.get_backend_session_secret_bytes().unwrap();
     let payload = DpsAuthSession::decode_token(&token, &secret).unwrap();
     assert_eq!(payload.sub, user.id.to_string());
   }
@@ -71,7 +71,7 @@ mod tests {
 
     assert_ne!(token1, token2);
 
-    let secret = config.get_auth_api_session_secret_bytes().unwrap();
+    let secret = config.get_backend_session_secret_bytes().unwrap();
     let payload1 = DpsAuthSession::decode_token(&token1, &secret).unwrap();
     let payload2 = DpsAuthSession::decode_token(&token2, &secret).unwrap();
 

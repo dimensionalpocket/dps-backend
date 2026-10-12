@@ -7,11 +7,11 @@ use std::path::PathBuf;
 #[command(version)]
 pub struct CliArgs {
   /// Path to SQLite database file
-  #[arg(long, env = "DPS_AUTH_API_SQLITE_FILE")]
+  #[arg(long, env = "DPS_BACKEND_SQLITE_FILE")]
   pub sqlite_file: Option<PathBuf>,
 
   /// Skip running seed files
-  #[arg(long, env = "DPS_AUTH_API_MIGRATE_SKIP_SEEDS")]
+  #[arg(long, env = "DPS_BACKEND_MIGRATE_SKIP_SEEDS")]
   pub skip_seeds: bool,
 
   /// Revert the last N migrations (default: 1)

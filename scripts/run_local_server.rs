@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // DpsConfig::new() automatically loads from environment variables
   let config = DpsConfig::new();
-  let port = config.get_auth_api_port().unwrap_or(3000);
+  let port = config.get_backend_port().unwrap_or(3000);
   let backend = DpsBackend::new(config)?;
 
   // The host owns the root, health check, and fallback routes.

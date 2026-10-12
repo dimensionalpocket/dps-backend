@@ -12,12 +12,12 @@ impl GenerateSessionCookieService {
       session_token,
       cookie_domain,
       api_path,
-      if config.get_auth_api_insecure_cookie() {
+      if config.get_backend_insecure_cookie() {
         ""
       } else {
         "; Secure"
       },
-      config.get_auth_api_session_ttl_seconds()
+      config.get_backend_session_ttl_seconds()
     )
   }
 }
@@ -31,7 +31,7 @@ mod tests {
   fn test_generate_session_cookie_secure() {
     let mut config = create_test_dps_config();
     config.set_domain("example.com");
-    config.set_auth_api_insecure_cookie(false);
+    config.set_backend_insecure_cookie(false);
     let cookie = GenerateSessionCookieService::run(&config, "test-token");
 
     assert!(cookie.starts_with("DpsAuthSession=test-token;"));
@@ -47,7 +47,7 @@ mod tests {
   fn test_generate_session_cookie_insecure() {
     let mut config = create_test_dps_config();
     config.set_domain("example.com");
-    config.set_auth_api_insecure_cookie(true);
+    config.set_backend_insecure_cookie(true);
 
     let cookie = GenerateSessionCookieService::run(&config, "test-token");
 

@@ -105,7 +105,7 @@ mod tests {
       .await
       .unwrap();
 
-    let secret = config.get_auth_api_session_secret_bytes().unwrap();
+    let secret = config.get_backend_session_secret_bytes().unwrap();
     let payload = DpsAuthSession::decode_token(&token, &secret).unwrap();
     assert_eq!(payload.sub, user.id.to_string());
   }
@@ -186,7 +186,7 @@ mod tests {
       .await
       .unwrap();
 
-    let secret = config.get_auth_api_session_secret_bytes().unwrap();
+    let secret = config.get_backend_session_secret_bytes().unwrap();
     let payload = DpsAuthSession::decode_token(&token, &secret).unwrap();
     assert_eq!(payload.sub, user.id.to_string());
   }

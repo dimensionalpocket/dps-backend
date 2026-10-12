@@ -13,7 +13,7 @@ use dps_config::DpsConfig;
 /// `{"user_id": <id>, "roles": ["admin"]}`
 fn create_config_with_custom_session_functions() -> DpsConfig {
   let mut config = DpsConfig::new();
-  config.set_auth_api_session_secret(Some("a".repeat(32).as_str()));
+  config.set_backend_session_secret(Some("a".repeat(32).as_str()));
 
   // Custom session_user_to_sub_fn: returns JSON with user_id and roles
   config.set_session_user_to_sub_fn(Box::new(|user_record: &serde_json::Value| {
@@ -56,7 +56,7 @@ async fn test_custom_session_user_to_sub_fn_generates_json_sub() {
   let token = CreateSessionForUserService::run(&user, &config).unwrap();
 
   // Decode token and verify sub is custom JSON format
-  let secret = config.get_auth_api_session_secret_bytes().unwrap();
+  let secret = config.get_backend_session_secret_bytes().unwrap();
   let payload = DpsAuthSession::decode_token(&token, &secret).unwrap();
 
   // Parse the sub as JSON and verify structure
@@ -98,7 +98,7 @@ async fn test_custom_session_functions_round_trip() {
   let token = CreateSessionForUserService::run(&user, &config).unwrap();
 
   // Step 2: Decode token to get payload
-  let secret = config.get_auth_api_session_secret_bytes().unwrap();
+  let secret = config.get_backend_session_secret_bytes().unwrap();
   let payload = DpsAuthSession::decode_token(&token, &secret).unwrap();
 
   // Step 3: Create session context from payload

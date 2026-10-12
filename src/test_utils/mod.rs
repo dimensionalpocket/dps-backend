@@ -22,17 +22,17 @@ use dps_config::DpsConfig;
 /// Create a test DpsConfig for use in controller and service tests
 pub fn create_test_dps_config() -> DpsConfig {
   let mut config = DpsConfig::new();
-  config.set_auth_api_port(Some(3000));
-  config.set_auth_api_sqlite_main_file_path(":memory:");
-  config.set_auth_api_sqlite_session_file_path(":memory:");
-  config.set_auth_api_session_secret(Some("a".repeat(32).as_str()));
+  config.set_backend_port(Some(3000));
+  config.set_backend_sqlite_main_file_path(":memory:");
+  config.set_backend_sqlite_session_file_path(":memory:");
+  config.set_backend_session_secret(Some("a".repeat(32).as_str()));
   config.set_domain("test.com");
   config.set_api_path("api");
-  config.set_auth_api_insecure_cookie(true);
+  config.set_backend_insecure_cookie(true);
   config.set_development_mode(true);
-  config.set_auth_api_sqlite_main_pool_size(Some(1));
-  config.set_auth_api_sqlite_session_pool_size(Some(1));
-  config.set_auth_api_session_ttl_seconds(Some(3600));
+  config.set_backend_sqlite_main_pool_size(Some(1));
+  config.set_backend_sqlite_session_pool_size(Some(1));
+  config.set_backend_session_ttl_seconds(Some(3600));
   config
 }
 
@@ -322,8 +322,8 @@ pub async fn create_test_app() -> axum::Router {
   std::mem::forget(temp_file);
 
   let mut config = create_test_dps_config();
-  config.set_auth_api_sqlite_main_file_path(&db_path);
-  config.set_auth_api_sqlite_session_file_path(":memory:");
+  config.set_backend_sqlite_main_file_path(&db_path);
+  config.set_backend_sqlite_session_file_path(":memory:");
   config.set_domain("dps.localhost");
 
   let backend = DpsBackend::new(config).expect("Failed to create test backend");

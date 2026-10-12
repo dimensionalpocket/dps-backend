@@ -29,7 +29,7 @@ tempfile = "3.0"
 aes-gcm = "0.10"
 base64 = "0.22"
 dps-auth-session = { git = "https://github.com/dimensionalpocket/dps-auth-session", tag = "0.3.0" }
-dps-config = { git = "https://github.com/dimensionalpocket/dps-config", tag = "0.10.2" }
+dps-config = { git = "https://github.com/dimensionalpocket/dps-config", branch = "dps-backend" }
 clap = { version = "4.0", features = ["derive", "env"] }
 
 [features]

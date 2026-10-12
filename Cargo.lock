@@ -546,7 +546,7 @@ dependencies = [
 [[package]]
 name = "dps-config"
 version = "0.10.2"
-source = "git+https://github.com/dimensionalpocket/dps-config?tag=0.10.2#15fcbf75b9a66435cc0e8cd573a05fa4706fae31"
+source = "git+https://github.com/dimensionalpocket/dps-config?branch=dps-backend#8dd829b4ad0d5aee58290a9b9e7d7e845eb346ea"
 dependencies = [
  "anyhow",
  "serde_json",

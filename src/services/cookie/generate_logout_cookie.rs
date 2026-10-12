@@ -11,7 +11,7 @@ impl GenerateLogoutCookieService {
       crate::middleware::session::SESSION_COOKIE_NAME,
       cookie_domain,
       api_path,
-      if config.get_auth_api_insecure_cookie() {
+      if config.get_backend_insecure_cookie() {
         ""
       } else {
         "; Secure"
@@ -29,7 +29,7 @@ mod tests {
   fn test_generate_logout_cookie_secure() {
     let mut config = create_test_dps_config();
     config.set_domain("example.com");
-    config.set_auth_api_insecure_cookie(false);
+    config.set_backend_insecure_cookie(false);
     let cookie = GenerateLogoutCookieService::run(&config);
 
     assert!(cookie.starts_with("DpsAuthSession=;"));
@@ -45,7 +45,7 @@ mod tests {
   fn test_generate_logout_cookie_insecure() {
     let mut config = create_test_dps_config();
     config.set_domain("example.com");
-    config.set_auth_api_insecure_cookie(true);
+    config.set_backend_insecure_cookie(true);
 
     let cookie = GenerateLogoutCookieService::run(&config);
 
