@@ -4,7 +4,6 @@
     "doom_loop": "ask",
     "external_directory": "ask",
     "bash": {
-      "git *": "deny",
       "npm *": "deny",
       "node *": "deny"
     }
