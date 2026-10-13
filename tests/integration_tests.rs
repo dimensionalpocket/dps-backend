@@ -1,94 +1,43 @@
 use axum::{
   body::Body,
   http::{Request, StatusCode},
+  response::Response,
   Router,
 };
-use dp_auth_service::{
-  database::test_utils::create_test_database,
-  graphql::schema::create_schema,
-  handlers::{
-    graphql::{graphql_get_handler, graphql_post_handler},
-    rest::{health_handler, not_found_handler, root_handler},
-  },
-  middleware::session::session_middleware,
-  services::UserService,
-};
-use sqlx::SqlitePool;
-use std::{env, sync::Once};
+use dps_backend::test_utils;
+use dps_backend::test_utils::create_test_user_via_api;
 use tower::ServiceExt;
-use tower_http::cors::CorsLayer;
 
-fn create_app() -> Router {
-  let schema = create_schema();
+async fn create_app() -> Router {
+  test_utils::create_test_app().await
+}
 
-  Router::new()
-    .route("/", axum::routing::get(root_handler))
-    .route("/health", axum::routing::get(health_handler))
-    .route(
-      "/graphql",
-      axum::routing::get(graphql_get_handler).post(graphql_post_handler),
+async fn to_json(response: Response<Body>) -> serde_json::Value {
+  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+    .await
+    .unwrap();
+  serde_json::from_slice(&body).unwrap()
+}
+
+async fn login(app: &Router, username: &str, password: &str) -> Response<Body> {
+  let body = serde_json::json!({ "username": username, "password": password });
+  app
+    .clone()
+    .oneshot(
+      Request::builder()
+        .method("POST")
+        .uri("/api/auth/login")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap(),
     )
-    .fallback(not_found_handler)
-    .layer(CorsLayer::permissive())
-    .with_state(schema)
-}
-
-async fn create_app_with_database() -> (Router, SqlitePool, tempfile::NamedTempFile) {
-  let (pool, temp_file) = create_test_database().await;
-
-  // Create schema with database pool in the data context
-  use async_graphql::{EmptySubscription, Schema};
-  use dp_auth_service::graphql::{mutation::Mutation, query::Query};
-
-  let schema = Schema::build(Query::new(), Mutation::new(), EmptySubscription)
-    .data(pool.clone())
-    .finish();
-
-  let app = Router::new()
-    .route("/", axum::routing::get(root_handler))
-    .route("/health", axum::routing::get(health_handler))
-    .route(
-      "/graphql",
-      axum::routing::get(graphql_get_handler).post(graphql_post_handler),
-    )
-    .layer(axum::middleware::from_fn(session_middleware))
-    .layer(CorsLayer::permissive())
-    .with_state(schema);
-
-  (app, pool, temp_file)
-}
-
-static INIT: Once = Once::new();
-
-fn setup_test_environment() {
-  INIT.call_once(|| {
-    // Set up test environment variables
-    env::set_var(
-      "DP_AUTH_SECRET_KEY",
-      "QvQlwpMujK+qzdRbUCikjc131OKt1KHE38Yq37V0Tbg=",
-    );
-    env::set_var("DP_AUTH_INSECURE_COOKIE", "true");
-    env::set_var("DP_AUTH_COOKIE_DOMAIN", ".api.dp-auth.localhost");
-
-    // Initialize session secret cache
-    use dp_auth_service::middleware::session::init_session_secret;
-    // Initialize session secret - fail test if this fails
-    init_session_secret().expect("Failed to initialize session secret for test");
-  });
-}
-
-async fn setup_default_role(pool: &SqlitePool) {
-  sqlx::query(
-    "INSERT INTO user_roles (name, created_ts, is_default) VALUES ('user', 1234567890, TRUE)",
-  )
-  .execute(pool)
-  .await
-  .unwrap();
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
 async fn test_root_endpoint() {
-  let app = create_app();
+  let app = create_app().await;
 
   let response = app
     .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -96,16 +45,16 @@ async fn test_root_endpoint() {
     .unwrap();
 
   assert_eq!(response.status(), StatusCode::OK);
-
   let body = axum::body::to_bytes(response.into_body(), usize::MAX)
     .await
     .unwrap();
-  assert_eq!(&body[..], b"OK");
+  let body = String::from_utf8(body.to_vec()).unwrap();
+  assert!(body.contains("data-page=\"app\""));
 }
 
 #[tokio::test]
 async fn test_health_endpoint() {
-  let app = create_app();
+  let app = create_app().await;
 
   let response = app
     .oneshot(
@@ -118,7 +67,6 @@ async fn test_health_endpoint() {
     .unwrap();
 
   assert_eq!(response.status(), StatusCode::OK);
-
   let body = axum::body::to_bytes(response.into_body(), usize::MAX)
     .await
     .unwrap();
@@ -126,392 +74,252 @@ async fn test_health_endpoint() {
 }
 
 #[tokio::test]
-async fn test_graphql_endpoint() {
-  let app = create_app();
-
-  let query = r#"{"query": "{ getServerTimestamp }"}"#;
+async fn test_server_timestamp_endpoint() {
+  let app = create_app().await;
 
   let response = app
     .oneshot(
       Request::builder()
-        .method("POST")
-        .uri("/graphql")
-        .header("content-type", "application/json")
-        .body(Body::from(query))
+        .uri("/api/server-timestamp")
+        .body(Body::empty())
         .unwrap(),
     )
     .await
     .unwrap();
 
   assert_eq!(response.status(), StatusCode::OK);
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-
-  // Should contain timestamp data
-  assert!(body_str.contains("getServerTimestamp"));
-  assert!(body_str.contains("data"));
+  let data = to_json(response).await;
+  assert!(data["timestamp"].as_str().unwrap().parse::<u64>().unwrap() > 0);
 }
 
 #[tokio::test]
-async fn test_create_session_mutation_success() {
-  setup_test_environment();
-  let (app, pool, _temp_file) = create_app_with_database().await;
+async fn test_register_returns_created_with_cookie() {
+  let app = create_app().await;
 
-  // Setup: Create a user
-  setup_default_role(&pool).await;
-  UserService::create_user(&pool, "testuser", "password123")
-    .await
-    .unwrap();
-
-  let query = r#"
-    {
-      "query": "mutation { createSession(input: { username: \"testuser\", password: \"password123\" }) { token message } }"
-    }
-  "#;
+  let body = serde_json::json!({
+    "username": "register_user",
+    "password": "password123",
+    "passwordConfirmation": "password123",
+  });
 
   let response = app
     .oneshot(
       Request::builder()
         .method("POST")
-        .uri("/graphql")
+        .uri("/api/auth/register")
         .header("content-type", "application/json")
-        .body(Body::from(query))
+        .body(Body::from(body.to_string()))
         .unwrap(),
     )
     .await
     .unwrap();
 
+  assert_eq!(response.status(), StatusCode::CREATED);
+
+  let cookie = response
+    .headers()
+    .get("set-cookie")
+    .expect("Set-Cookie header should be present")
+    .to_str()
+    .unwrap()
+    .to_string();
+  assert!(cookie.contains("DpsSession="));
+  assert!(cookie.contains("Domain=.dps.localhost"));
+  assert!(cookie.contains("Path=/api"));
+  assert!(cookie.contains("HttpOnly"));
+  assert!(!cookie.contains("Secure"));
+
+  let data = to_json(response).await;
+  assert!(!data["user"]["uuid"].as_str().unwrap().is_empty());
+  assert_eq!(
+    data["message"].as_str().unwrap(),
+    "User registration successful"
+  );
+}
+
+#[tokio::test]
+async fn test_login_success_sets_cookie() {
+  let app = create_app().await;
+  create_test_user_via_api(&app, "login_user", "password123").await;
+
+  let response = login(&app, "login_user", "password123").await;
   assert_eq!(response.status(), StatusCode::OK);
+  assert!(response.headers().get("set-cookie").is_some());
 
-  // Check for Set-Cookie header
-  let headers = response.headers();
-  let cookie_header = headers.get("set-cookie");
-  assert!(
-    cookie_header.is_some(),
-    "Set-Cookie header should be present"
+  let data = to_json(response).await;
+  assert!(!data["token"].as_str().unwrap().is_empty());
+  assert_eq!(data["user"]["name"].as_str().unwrap(), "login_user");
+  assert_eq!(
+    data["message"].as_str().unwrap(),
+    "Authentication successful"
   );
-
-  let cookie_value = cookie_header.unwrap().to_str().unwrap();
-  assert!(cookie_value.contains("DpAuthSession="));
-  assert!(cookie_value.contains("Domain=.api.dp-auth.localhost"));
-  assert!(cookie_value.contains("HttpOnly"));
-  assert!(cookie_value.contains("SameSite=Strict"));
-  // Should not contain Secure flag due to DP_AUTH_INSECURE_COOKIE=true
-  assert!(!cookie_value.contains("Secure"));
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-
-  // Should contain successful response
-  assert!(body_str.contains("createSession"));
-  assert!(body_str.contains("token"));
-  assert!(body_str.contains("Authentication successful"));
-  assert!(!body_str.contains("errors"));
 }
 
 #[tokio::test]
-async fn test_create_session_mutation_invalid_credentials() {
-  setup_test_environment();
-  let (app, pool, _temp_file) = create_app_with_database().await;
+async fn test_login_invalid_credentials_returns_401() {
+  let app = create_app().await;
+  create_test_user_via_api(&app, "bad_login", "password123").await;
 
-  // Setup: Create a user
-  setup_default_role(&pool).await;
-  UserService::create_user(&pool, "testuser", "password123")
-    .await
-    .unwrap();
+  let response = login(&app, "bad_login", "wrong_password").await;
+  assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+  assert!(response.headers().get("set-cookie").is_none());
 
-  let query = r#"
-    {
-      "query": "mutation { createSession(input: { username: \"testuser\", password: \"wrongpassword\" }) { token message } }"
-    }
-  "#;
+  let data = to_json(response).await;
+  assert_eq!(data["error"].as_str().unwrap(), "Invalid credentials");
+}
+
+#[tokio::test]
+async fn test_login_missing_user_returns_401() {
+  let app = create_app().await;
+
+  let response = login(&app, "nonexistent", "password123").await;
+  assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+  let data = to_json(response).await;
+  assert_eq!(data["error"].as_str().unwrap(), "Invalid credentials");
+}
+
+#[tokio::test]
+async fn test_auth_me_requires_session() {
+  let app = create_app().await;
 
   let response = app
     .oneshot(
       Request::builder()
-        .method("POST")
-        .uri("/graphql")
-        .header("content-type", "application/json")
-        .body(Body::from(query))
+        .uri("/api/auth/me")
+        .body(Body::empty())
         .unwrap(),
     )
     .await
     .unwrap();
 
-  assert_eq!(response.status(), StatusCode::OK); // GraphQL returns 200 even for business logic errors
-
-  // Should not have Set-Cookie header on failure
-  let headers = response.headers();
-  let cookie_header = headers.get("set-cookie");
-  assert!(
-    cookie_header.is_none(),
-    "Set-Cookie header should not be present on authentication failure"
-  );
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-
-  // Should contain error response
-  assert!(body_str.contains("errors"));
-  assert!(body_str.contains("Invalid credentials"));
+  assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn test_create_session_mutation_with_missing_user() {
-  setup_test_environment();
-  let (app, _pool, _temp_file) = create_app_with_database().await;
+async fn test_auth_me_authenticated_with_bearer() {
+  let app = create_app().await;
+  create_test_user_via_api(&app, "me_user", "password123").await;
 
-  let query = r#"
-    {
-      "query": "mutation { createSession(input: { username: \"nonexistent\", password: \"password123\" }) { token message } }"
-    }
-  "#;
+  let login_data = to_json(login(&app, "me_user", "password123").await).await;
+  let token = login_data["token"].as_str().unwrap().to_string();
 
   let response = app
     .oneshot(
       Request::builder()
-        .method("POST")
-        .uri("/graphql")
-        .header("content-type", "application/json")
-        .body(Body::from(query))
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-  assert_eq!(response.status(), StatusCode::OK); // GraphQL returns 200 even for business logic errors
-
-  // Should not have Set-Cookie header on failure
-  let headers = response.headers();
-  let cookie_header = headers.get("set-cookie");
-  assert!(
-    cookie_header.is_none(),
-    "Set-Cookie header should not be present when user doesn't exist"
-  );
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-
-  // Should contain error response
-  assert!(body_str.contains("errors"));
-  assert!(body_str.contains("Invalid credentials"));
-}
-
-#[tokio::test]
-async fn test_get_current_session_integration_authenticated() {
-  setup_test_environment();
-  let (app, pool, _temp_file) = create_app_with_database().await;
-
-  // Setup: Create a user
-  setup_default_role(&pool).await;
-  UserService::create_user(&pool, "testuser", "password123")
-    .await
-    .unwrap();
-
-  // Create session first
-  let create_session_query = r#"
-    {
-      "query": "mutation { createSession(input: { username: \"testuser\", password: \"password123\" }) { token message } }"
-    }
-  "#;
-
-  let create_session_response = app
-    .clone()
-    .oneshot(
-      Request::builder()
-        .method("POST")
-        .uri("/graphql")
-        .header("content-type", "application/json")
-        .body(Body::from(create_session_query))
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-  assert_eq!(create_session_response.status(), StatusCode::OK);
-
-  let create_session_body = axum::body::to_bytes(create_session_response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let create_session_str = String::from_utf8(create_session_body.to_vec()).unwrap();
-  let session_data: serde_json::Value = serde_json::from_str(&create_session_str).unwrap();
-  let token = session_data["data"]["createSession"]["token"]
-    .as_str()
-    .unwrap();
-
-  // Test getCurrentSession with token in header
-  let get_session_query = r#"
-    {
-      "query": "{ getCurrentSession { sub iat exp } }"
-    }
-  "#;
-
-  let response = app
-    .oneshot(
-      Request::builder()
-        .method("POST")
-        .uri("/graphql")
-        .header("content-type", "application/json")
+        .uri("/api/auth/me")
         .header("authorization", format!("Bearer {token}"))
-        .body(Body::from(get_session_query))
+        .body(Body::empty())
         .unwrap(),
     )
     .await
     .unwrap();
 
   assert_eq!(response.status(), StatusCode::OK);
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-  let data: serde_json::Value = serde_json::from_str(&body_str).unwrap();
-
-  assert!(data["errors"].is_null());
-  assert!(!data["data"]["getCurrentSession"].is_null());
-  assert!(data["data"]["getCurrentSession"]["sub"].as_i64().unwrap() > 0);
-  assert!(data["data"]["getCurrentSession"]["iat"].as_i64().unwrap() > 0);
-  assert!(data["data"]["getCurrentSession"]["exp"].as_i64().unwrap() > 0);
+  let data = to_json(response).await;
+  assert_eq!(data["user"]["name"].as_str().unwrap(), "me_user");
+  assert!(data["sessionIat"].as_i64().unwrap() > 0);
+  assert!(data["sessionExp"].as_i64().unwrap() > 0);
 }
 
 #[tokio::test]
-async fn test_get_current_session_integration_unauthenticated() {
-  setup_test_environment();
-  let (app, _pool, _temp_file) = create_app_with_database().await;
+async fn test_auth_me_authenticated_with_cookie() {
+  let app = create_app().await;
+  create_test_user_via_api(&app, "cookie_user", "password123").await;
 
-  let query = r#"
-    {
-      "query": "{ getCurrentSession { sub iat exp } }"
-    }
-  "#;
+  let login_response = login(&app, "cookie_user", "password123").await;
+  let cookie = login_response
+    .headers()
+    .get("set-cookie")
+    .unwrap()
+    .to_str()
+    .unwrap()
+    .to_string();
 
   let response = app
     .oneshot(
       Request::builder()
-        .method("POST")
-        .uri("/graphql")
-        .header("content-type", "application/json")
-        .body(Body::from(query))
+        .uri("/api/auth/me")
+        .header("cookie", cookie)
+        .body(Body::empty())
         .unwrap(),
     )
     .await
     .unwrap();
 
   assert_eq!(response.status(), StatusCode::OK);
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-  let data: serde_json::Value = serde_json::from_str(&body_str).unwrap();
-
-  assert!(data["errors"].is_null());
-  assert!(data["data"]["getCurrentSession"].is_null());
+  let data = to_json(response).await;
+  assert_eq!(data["user"]["name"].as_str().unwrap(), "cookie_user");
 }
 
 #[tokio::test]
-async fn test_get_current_session_integration_invalid_token() {
-  setup_test_environment();
-  let (app, _pool, _temp_file) = create_app_with_database().await;
-
-  let query = r#"
-    {
-      "query": "{ getCurrentSession { sub iat exp } }"
-    }
-  "#;
+async fn test_auth_me_invalid_token_is_unauthorized() {
+  let app = create_app().await;
 
   let response = app
     .oneshot(
       Request::builder()
-        .method("POST")
-        .uri("/graphql")
-        .header("content-type", "application/json")
+        .uri("/api/auth/me")
         .header("authorization", "Bearer invalid_token")
-        .body(Body::from(query))
+        .body(Body::empty())
         .unwrap(),
     )
     .await
     .unwrap();
 
-  assert_eq!(response.status(), StatusCode::OK);
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-  let data: serde_json::Value = serde_json::from_str(&body_str).unwrap();
-
-  assert!(data["errors"].is_null());
-  assert!(data["data"]["getCurrentSession"].is_null());
+  assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn test_404_handler_returns_not_found() {
-  let app = create_app();
+async fn test_404_handler_renders_inertia_error_page() {
+  let app = create_app().await;
 
-  let request = Request::builder()
-    .uri("/nonexistent")
-    .body(Body::empty())
+  let response = app
+    .oneshot(
+      Request::builder()
+        .uri("/nonexistent")
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await
     .unwrap();
 
-  let response = app.oneshot(request).await.unwrap();
-
   assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
   let body = axum::body::to_bytes(response.into_body(), usize::MAX)
     .await
     .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-  assert_eq!(body_str, "NOT FOUND");
+  let body = String::from_utf8(body.to_vec()).unwrap();
+  assert!(body.contains("\"component\":\"Error\"") || body.contains("\"component\": \"Error\""));
 }
 
-#[tokio::test]
-async fn test_404_handler_with_query_string() {
-  let app = create_app();
+#[test]
+fn test_session_context_utility_methods() {
+  use dps_auth_session::DpsAuthSessionPayload;
+  use dps_backend::middleware::session::SessionContext;
+  use dps_backend::test_utils::create_test_dps_config;
+  use dps_backend::utils::session_context_sub_to_user_id;
 
-  let request = Request::builder()
-    .uri("/nonexistent?param=value")
-    .body(Body::empty())
-    .unwrap();
+  let config = create_test_dps_config();
 
-  let response = app.oneshot(request).await.unwrap();
+  let empty_context = SessionContext::new(None);
+  assert!(!empty_context.authenticated());
+  assert!(session_context_sub_to_user_id(&empty_context, &config).is_err());
 
-  assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-  assert_eq!(body_str, "NOT FOUND");
+  let payload = DpsAuthSessionPayload {
+    sub: "123".to_string(),
+    iat: 1000,
+    exp: 2000,
+  };
+  let auth_context = SessionContext::new(Some(payload));
+  assert!(auth_context.authenticated());
+  assert_eq!(
+    session_context_sub_to_user_id(&auth_context, &config),
+    Ok(123)
+  );
 }
 
-#[tokio::test]
-async fn test_404_handler_with_post_method() {
-  let app = create_app();
-
-  let request = Request::builder()
-    .method("POST")
-    .uri("/nonexistent")
-    .header("content-type", "application/json")
-    .body(Body::from(r#"{"test": "data"}"#))
-    .unwrap();
-
-  let response = app.oneshot(request).await.unwrap();
-
-  assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-  let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  let body_str = String::from_utf8(body.to_vec()).unwrap();
-  assert_eq!(body_str, "NOT FOUND");
+#[test]
+fn test_session_cookie_name_constant() {
+  use dps_backend::middleware::session::SESSION_COOKIE_NAME;
+  assert_eq!(SESSION_COOKIE_NAME, "DpsSession");
 }

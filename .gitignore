@@ -2,6 +2,13 @@ data/
 target/
 .env
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/hot
+
 # Executables copied to project root for testing
-dp-auth-service
-migrate_and_dump
+run_local_server
+dps-backend-migrate
+
+tmp

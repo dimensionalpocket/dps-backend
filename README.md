@@ -1,186 +1,459 @@
-# Dimensional Pocket - Auth Service
+# @dimensionalpocket/dps-backend
 
-This document outlines the project configuration and roadmap for the Rust-based GraphQL Auth Service for Dimensional Pocket. The service will provide REST endpoints, a GraphQL API, and user management functionalities.
+[![Rust Tests](https://github.com/dimensionalpocket/dps-backend/actions/workflows/test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-backend/actions/workflows/test.yml) [![Docker Build Test](https://github.com/dimensionalpocket/dps-backend/actions/workflows/docker-build-test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-backend/actions/workflows/docker-build-test.yml)
 
-## Project Configuration
+An opinionated authentication, user management, and session handling backend, packaged as a monolith
+composable: it serves an [Inertia.js](https://inertiajs.com/) Vue frontend from the root path `/`, owns
+the `/health` endpoint, and exposes a REST API under `/{api_path}`.
 
-- **Project Name**: `dp-auth-service`
-- **Indentation**: Use 2 spaces for Rust code (not the standard 4 spaces)
-- **GraphQL Library**: `async-graphql`
-- **Database**: `sqlx` with SQLite on a file in the repo root's `data` directory (will be mounted in production)
-- **REST endpoints**: `/` and `/health`, via `axum`
-- **GraphQL Endpoint**: `/graphql`
-- **Async Runtime**: `tokio`
-- **Password Hashing**: `argon2`; 16-byte salt generated with `rand::rngs::OsRng`
-- **Design Patterns**:
-  - GraphQL queries and mutations only call Service objects and handle the response
-    - E.g., `getServerTimestamp` query calls `ServerService::get_server_timestamp`
-    - Service objects are static and do not require instantiation
-    - Service objects have their own unit tests with full coverage
-    - GraphQL Query and Mutation tests only test if they're calling the Service methods with the correct parameters
-    - Service objects are stored in `src/services`
-    - Each GraphQL query and mutation are implemented in independent files in `src/graphql/queries` and `src/graphql/mutations` respectively
-      - Files are named directly after the query or mutation they implement, e.g., `get_server_timestamp.rs` for the `getServerTimestamp` query
-      - The structs for the queries and mutations are suffixed with `Query` or `Mutation`
-        - E.g., `GetServerTimestampQuery` for the `getServerTimestamp` query
-  - SQL Queries are executed via SQL Query objects
-    - E.g., `UserByIdQuery::run(user_id)`
-    - All SQL query objects have a `run` method (arguments may vary) that executes the database query and returns the result
-    - SQL Query objects are static and do not require instantiation
-    - SQL Query objects are stored in `src/queries`
+It can be deployed on its own as a service with a volume to house the SQLite databases, but it can also
+be embedded into a larger `axum` application. The backend can optionally own `axum::serve` and graceful
+shutdown via `DpsBackend::serve`; hosts that need full control over the listener (TLS termination, Unix
+sockets, socket options) can instead build the router with `DpsBackend::routes` / `enhance_api` and serve
+it themselves. A host can merge its own API routes into the `{api_path}` namespace via
+`DpsBackend::enhance_api`, and those routes inherit the backend's session, request-id, tracing, and CORS
+layers.
 
-## Roadmap
+The backend owns the root router (`/`, `/health`, `/{api_path}`, and the fallback). API paths return a
+plain-text `404 NOT FOUND`; any other unknown path renders the Inertia `Error` page.
 
-### Phase 1: Project Setup w/ REST Endpoints + `getServerTimestamp` query
+## Features
 
-- [x] Initialize Rust project
-- [x] Configure `async-graphql`, `axum`, `sqlx`, and `tokio`
-- [x] Create REST endpoints:
-  - [x] `/` - Returns a simple "OK" message
-  - [x] `/health` - Returns a simple "OK" message
-- [x] Implement `getServerTimestamp` GraphQL query and associated Service object:
-  - [x] Returns the current server timestamp (milliseconds since epoch)
-- [x] Test the REST endpoints, `getServerTimestamp` query, and the Service object
-- [x] Document the API endpoints and query
+- Inertia.js frontend served from `/` (Vite-built, code-split pages)
+- REST API with authentication, user, role, and site endpoints
+- User management with role-based permissions
+- Session token management with encrypted tokens
+- Password hashing with Argon2
+- SQLite database with migrations
+- Composable router: merge host API routes with `enhance_api`
+- Optional server ownership: `serve`/`serve_listener`/`serve_with_shutdown` handle `axum::serve` and graceful shutdown
+- Shared database handles exposed to the host for custom queries and data changes
 
-### Phase 2: Logging
+## Frontend pages
 
-- [x] Suggest industry standards for logging endpoints and queries in Rust/GraphQL
-- [x] Implement logging for existing REST endpoints and GraphQL queries (check Phase 1 for a list of endpoints and queries)
-  - [x] For REST endpoints, log the request method, path, response status, and response time
-  - [x] For GraphQL queries, log the operation name and response time (no parameters)
+The Inertia page routes are served from the root path and are auth-agnostic shells. Auth is resolved
+client-side by the Vue app; "Guard" below is a client-side guard.
 
-### Phase 3: Password Service
+| Method | Path | Inertia component | Guard |
+|--------|------|-------------------|-------|
+| `GET` | `/` | `Home` | auth |
+| `GET` | `/login` | `Auth/Login` | none |
+| `GET` | `/register` | `Auth/Register` | none |
+| `GET` | `/login-success` | `Auth/LoginSuccess` | auth |
+| `GET` | `/password-change` | `Auth/PasswordChange` | auth |
+| `GET` | `/admin` | `Admin/Home` | admin |
+| `GET` | `/admin/users` | `Admin/Users` | admin |
+| `GET` | `/admin/sites` | `Admin/Sites` | admin |
+| `GET` | `/admin/sites/new` | `Admin/SitesNew` | admin |
+| `GET` | `/admin/sites/{id}/edit` | `Admin/SitesEdit` | admin (props: `{id}`) |
+| `GET` | `/health` | — (plain `"OK"`) | none |
+| — | fallback (non-API) | `Error` (`404`) | none |
 
-- [x] Implement `PasswordService` for user password management
-  - [x] `generate` method to create a new password hash
-    - Already includes the salt generation
-  - [x] `verify` method to check a password against a hash
-- [x] Test the `PasswordService` methods
-- [x] Document the `PasswordService` methods via Rust doc comments
+In production the compiled assets are served from `/build/` via `ServeDir(frontend/dist)`; in
+development the Vite dev server (port `5000`) serves them and writes `frontend/hot` for the backend to
+resolve.
 
-### Phase 4: Database Configuration
+## API Endpoints
 
-- [x] Configure `sqlx` to use SQLite database in `data/development.db` (filename to come from environment variable)
-- [x] Create database schema with `sqlx` migrations
-  - [x] Create migration for `user_roles` table
-  - [x] Create migration for `users` table
-  - [x] Schema defined with proper foreign key constraints
-  - [x] Migrations stored in `config/database/migrations`
-- [x] Run migrations to create the database schema
-- [x] Verify support for schema dump after running migrations, to be stored in `config/database/schema.sql`
-- [x] Implement SQL Query objects following project patterns
-- [x] Create comprehensive unit tests for all query objects
-- [x] Create integration tests demonstrating complete user creation flow
-- [x] Implement seeds system with default user roles
+All routes are nested under `/{api_path}` (default `/api`). Requests and responses are JSON with
+camelCase field names. Errors use the envelope `{"error":"<message>"}`.
 
-### Phase 5: User Roles and Permissions
+### System
 
-- [x] Suggest industry standards for user roles and permissions in Rust/GraphQL
-- [x] Permissions are granular (e.g., `can_create_user`, `can_delete_user`, etc.) and can be assigned to roles
-- [x] Update the database schema to store permissions for roles (details to be defined)
-- [x] Implement `UserRoleService` for managing user roles and checking permissions
-  - [x] `get_role_by_id` method to retrieve a role by ID
-  - [x] `get_role_by_name` method to retrieve a role by name
-  - [x] `check_permission` method to check if a user has a specific permission
+| Method | Path | Auth | Request | Success |
+|--------|------|------|---------|---------|
+| `GET` | `{api_path}/server-timestamp` | none | — | `200 {"timestamp":"<ms>"}` |
 
-### Phase 6: User Service - User Creation and Retrieval
+### Auth
 
-- [x] Implement `UserService` for user management
-  - [x] `create_user` method to create a new user
-    - [x] Validates input (username and password) and checks for username already in use
-    - [x] Uses `PasswordService` to hash the password
-    - [x] Assigns default role to the user
-  - [x] `get_user_by_id` method to retrieve a user by ID
-  - [x] `get_user_by_name` method to retrieve a user by name
+| Method | Path | Auth | Request body | Success |
+|--------|------|------|--------------|---------|
+| `POST` | `{api_path}/auth/register` | none | `{username,password,passwordConfirmation}` | `201 {user,message}` + `Set-Cookie` |
+| `POST` | `{api_path}/auth/login` | none | `{username,password}` | `200 {token,user,message}` + `Set-Cookie` |
+| `POST` | `{api_path}/auth/logout` | none | — | `200 {message}` + expired `Set-Cookie` |
+| `PATCH` | `{api_path}/auth/password` | session | `{currentPassword,newPassword,newPasswordConfirmation}` | `200 {message,updatedTs}` |
+| `GET` | `{api_path}/auth/me` | session | — | `200 {user,sessionIat,sessionExp}` / `401` |
 
-### Phase 7: `createUser` Mutation
+### Sites
 
-- [x] Implement `createUser` GraphQL mutation
-  - [x] Calls `UserService::create_user`
-  - [x] Returns the created user object
-- [x] Unit tests for the `createUser` mutation
-  - [x] Tests should verify that the mutation calls the `UserService::create_user` method with the correct parameters
-- [x] Integration tests for the `createUser` mutation
-  - [x] Call the endpoint to create a user
+| Method | Path | Permission | Request body | Success |
+|--------|------|------------|--------------|---------|
+| `GET` | `{api_path}/sites` | none | — | `200 [site]` |
+| `GET` | `{api_path}/sites/{id}` | `can_view_site_details` | — | `200 site` |
+| `POST` | `{api_path}/sites` | `can_create_site` | `{slug,subdomain?,port?,protocol?,metadataJson?}` | `201 site` |
+| `PATCH` | `{api_path}/sites/{id}` | `can_update_site` | `{slug?,subdomain?,port?,protocol?,metadataJson?}` | `200 site` |
+| `DELETE` | `{api_path}/sites/{id}` | `can_delete_site` | — | `200 site` |
 
-### Phase 8: Session Service - Token Management
+### Users
 
-- [x] Implement `SessionService` for managing session tokens
-  - [x] We're using a custom encrypted token format, not JWT
-    - Why not JWT? Because we don't want to expose the payload structure to consumers
-    - Consumers will call a future `getCurrentSession` query to retrieve the session payload with the token in the request (header or cookie)
-  - [x] Define the payload structure for the session token - JSON-serializable
-    - Fields: `sub` (subject - user id), `iat` (issued at timestamp), `exp` (expiration timestamp)
-  - [x] Requires a secret key for signing tokens, stored in an environment variable (`DP_AUTH_SECRET_KEY`)
-    - Determine how the service will act if the secret key is not set
-  - [x] `encode_token` method to create a session token from a payload
-  - [x] `decode_token` method to decode a session token and retrieve the payload
-- [x] Test the `SessionService` methods
-- [x] Document the `SessionService` methods via Rust doc comments
+| Method | Path | Permission | Request body | Success |
+|--------|------|------------|--------------|---------|
+| `GET` | `{api_path}/users` | `can_list_users` | — | `200 [user]` |
+| `GET` | `{api_path}/users/{id}` | `can_view_user_details` | — | `200 user` |
+| `PATCH` | `{api_path}/users/{id}` | `can_edit_user` | `{name?,roleId?,password?,passwordConfirmation?,metadataJson?}` | `200 user` |
+| `DELETE` | `{api_path}/users/{id}` | `can_delete_user` | — | `200 {success:true}` |
 
-### Phase 9: Session Middleware
+### Roles
 
-- [x] Implement middleware for session token management, to be used in the GraphQL API only (all queries and mutations)
-- [x] Middleware should:
-  - [x] Check for the session token in the request header or cookie, in that order (if both present, prefer the header)
-    - Do not fallback to cookie if the header token is present but invalid
-  - [x] Decode the token using `SessionService::decode_token`
-  - [x] If valid, attach the decoded session token payload to the request context
-  - [x] If invalid or missing, don't attach the payload and allow the request to proceed without it (each resolver will handle the absence of the payload)
-- [x] Decisions to make:
-  - [x] What is the prefix for the auth header, considering it's a custom encrypted token? ("Bearer" or something else?)
-  - [x] Do we need to know the cookie name? If so, use `DpAuthSession` as the cookie name and store this string in a constant
-- [x] Allow resolvers to have access to the session token payload via the request context
-  - Resolvers can then propagate the session token payload to the Service objects on a case-by-case basis
-- [x] Unit tests to ensure the middleware is attaching the session token payload when valid
-  - Integration tests will be implemented in a later phase, by resolvers that actually use the session token payload
+| Method | Path | Permission | Request body | Success |
+|--------|------|------------|--------------|---------|
+| `GET` | `{api_path}/roles` | `can_manage_roles` OR `can_edit_user_role` | — | `200 [role]` |
+| `GET` | `{api_path}/roles/{id}` | `can_manage_roles` | — | `200 role` |
+| `GET` | `{api_path}/role-permissions` | `can_manage_roles` | — | `200 [String]` |
+| `POST` | `{api_path}/roles` | `can_manage_roles` | `{name,permissions:[String]}` | `201 role` |
+| `PATCH` | `{api_path}/roles/{id}` | `can_manage_roles` | `{name?,permissions?}` | `200 role` |
+| `PUT` | `{api_path}/roles/{id}/default` | `can_manage_roles` | — | `200 role` |
+| `DELETE` | `{api_path}/roles/{id}` | `can_manage_roles` | — | `200 {success,id,name}` |
 
-### Phase 10: `SessionService::create_session` Method
+### JSON shapes
 
-- [x] Accepts username and password as input
-- [x] Calls `UserService::get_user_by_name` to retrieve the user by username
-- [x] Calls `PasswordService::verify` to check the password against the stored hash
-- [x] If valid, calls `SessionService::encode_token` to create a session token
-- [x] Returns the session token, or an error if the credentials are invalid
-  - [x] Error message should be specific (e.g., "User is blank" or "User not found" or "Password is blank" or "Password does not match", etc)
-  - [x] Errors should be logged using the existing logging system and must contain the given username (not the password) for debugging
-  - [x] Errors should be logged at `info` level, not `warn` or `error` -- those errors should not raise alarms in our logs, they're just infomational
-- [x] Verify existing CORS configuration for 'with_credentials' support
-- [x] Unit tests for the `create_session` method
-- [x] Document the `create_session` method via Rust doc comments
+- `site`: `{id, slug, subdomain, port, protocol, metadataJson, createdTs, updatedTs}`
+- `user`: `{id, uuid, name, role:{id, name, permissions:[String]}, metadataJson, createdTs, updatedTs}`
+- `role`: `{id, name, isDefault, permissions:[String], createdTs, updatedTs}`
 
-### Phase 11: `createSession` Mutation (sign-in)
+### Error status codes
 
-- [x] Implement `createSession` GraphQL mutation
-  - [x] Accepts username and password as input
-  - [x] Calls `SessionService::create_session`
-    - [x] On success, returns the session token and sets the cookie with the token in the response
-    - [x] On failure, returns a user-friendly error message (not the internal error message), e.g., "Invalid credentials" for any username or password error, or "Internal server error" for unexpected errors
-  - [x] Make a decision if errors should return 2XX or 4XX status codes, as it impacts the client-side error handling (decision: 2XX)
-- [x] Unit tests for the `createSession` mutation, ensuring it calls the `SessionService::create_session` method with the correct parameters
-- [x] Integration tests for the `createSession` mutation, ensuring it returns a session token and sets the cookie in the response
+| Domain error | Status |
+|---|---|
+| `ValidationError`, `InvalidPermission` | `400 Bad Request` |
+| `AuthenticationError`, invalid credentials, no session | `401 Unauthorized` |
+| `AuthorizationError` ("Forbidden") | `403 Forbidden` |
+| `SiteNotFound`, `UserNotFound`, `RoleNotFound` | `404 Not Found` |
+| `UsernameAlreadyExists`, `RoleNameAlreadyExists`, `SlugAlreadyExists`, `RoleInUse`, `SelfDeletion` | `409 Conflict` |
+| Database/configuration/internal errors | `500 Internal Server Error` |
 
-### Phase 12: `getCurrentSession` Query
+## Installation
 
-- [x] Returns the current session token payload, set by the session middleware
-- [x] Make a decision if the query should return 2XX or 401 status code if the session token is not present or invalid
-- [x] Unit tests for the `getCurrentSession` query
-- [x] Integration tests for the `getCurrentSession` query
+Add this to your `Cargo.toml`:
 
-### Phase 13: Handle 404s in the REST API
+```toml
+[dependencies]
+dps-backend = { git = "https://github.com/dimensionalpocket/dps-backend", tag = "0.1.0" }
+```
 
-- [x] Implement a 404 handler for the REST API
-- [x] Requests to non-existent endpoints should return a 404 status code with a plain "NOT FOUND" message
-- [x] Requests should be logged with the request method, path, querystring, and body size (if present); log level should be `info`
-- [x] Integration tests for the 404 handler
+## Usage
 
-## Future Phases
+### Quickstart (monolith composable)
 
-- Email support
-- Cookie-less session management (using custom headers in response)
-- Password change (when logged in)
-- Password reset (requires email support)
-- Username change
-- User deletion/redaction
-- `user_sessions` table to track user sessions and make tokens revocable
+```rust
+use axum::Router;
+use dps_backend::DpsBackend;
+use dps_config::DpsConfig;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // DpsConfig loads from environment variables automatically.
+    // Requires DPS_BACKEND_SESSION_SECRET to be set.
+    let config = DpsConfig::new();
+    let backend = DpsBackend::new(config)?;
+
+    // The backend owns `/`, `/health`, `/{api_path}`, and the fallback.
+    // The host contributes only its own API routes (paths relative to the API root).
+    let host_api = Router::new();
+    let app = backend.enhance_api(host_api).await?;
+
+    // The backend binds `0.0.0.0:<bind port>` (DPS_BACKEND_BIND_PORT -> PORT -> 3000)
+    // and handles graceful shutdown on SIGINT/SIGTERM.
+    backend.serve(app).await?;
+    Ok(())
+}
+```
+
+> Hosts may add their own routes under the backend's `{api_path}` namespace, as long as they do not
+> redefine an exact backend method + path (e.g. a duplicate `GET /auth/me`), which panics on merge.
+> Distinct paths merge cleanly. See
+> [Mounting host routes under the API path](#mounting-host-routes-under-the-api-path).
+
+### Serving the app
+
+`serve` is the one-liner: it binds `0.0.0.0` on the resolved **bind** port (`DPS_BACKEND_BIND_PORT` ->
+`PORT` -> `3000`) and shuts down gracefully on SIGINT/SIGTERM. This bind port is internal and separate
+from the **public** `DPS_BACKEND_PORT`, which only appears in generated URLs. For more control, use a
+caller-owned listener:
+
+```rust
+use tokio::net::TcpListener;
+
+// Caller-owned listener (loopback, Unix socket, TLS front proxy, ...);
+// the backend still owns `axum::serve` and the default SIGINT/SIGTERM shutdown.
+let listener = TcpListener::bind("127.0.0.1:3000").await?;
+backend.serve_listener(listener, app).await?;
+```
+
+```rust
+// Caller-owned listener and shutdown future (e.g. drain background tasks first).
+let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+tokio::spawn(async move { let _ = tx.send(()); });
+backend
+    .serve_with_shutdown(listener, app, async move {
+        let _ = rx.await;
+    })
+    .await?;
+```
+
+Hosts that want to own `axum::serve` too can skip the `serve*` methods entirely and pass the router
+from `routes()` / `enhance_api()` to their own server.
+
+### Full example (complete configuration)
+
+```rust
+use dps_backend::DpsBackend;
+use dps_config::DpsConfig;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = DpsConfig::new();
+
+    // Override defaults
+    config.set_backend_port(Some(3000));
+    config.set_backend_sqlite_main_file_path("data/production.db");
+    config.set_backend_session_secret(Some("your-32-byte-secret-here!!!!"));
+    config.set_domain("yourdomain.com");
+    config.set_backend_insecure_cookie(false);
+    config.set_development_mode(false);
+    config.set_backend_sqlite_main_pool_size(Some(10));
+
+    let backend = DpsBackend::new(config)?;
+
+    // `backend.routes().await?` returns the bare root router (no host routes).
+    let app = backend.enhance_api(axum::Router::new()).await?;
+    backend.serve(app).await?;
+    Ok(())
+}
+```
+
+### Accessing the databases from the host
+
+The backend lazily creates and caches a single `DpsBackendDatabases` instance and shares it with the
+embedded router, so the host can borrow the exact same connection pools. Call `DpsBackend::databases()`
+to obtain a `&DpsBackendDatabases` and run your own queries — including inserts, updates, and deletes —
+against the main and session databases:
+
+```rust
+use dps_backend::DpsBackend;
+use dps_config::DpsConfig;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = DpsConfig::new();
+    let backend = DpsBackend::new(config)?;
+
+    // Lazily created on first call and cached; the same instance is used by
+    // `migrate_database()`, `seed_database()`, and `routes()`/`enhance_api()`.
+    let databases = backend.databases().await?;
+
+    // Acquire a connection from either pool.
+    let mut conn = databases.main().acquire().await?;
+    sqlx::query("UPDATE sites SET port = ? WHERE id = ?")
+        .bind(8443)
+        .bind(1)
+        .execute(&mut *conn)
+        .await?;
+
+    // Session data is available through `databases.session()`.
+    let _session_pool = databases.session();
+
+    let app = backend.enhance_api(axum::Router::new()).await?;
+    backend.serve(app).await?;
+    Ok(())
+}
+```
+
+> Hosts that run raw SQL must add `sqlx` (with the `sqlite` feature) to their own dependencies. The
+> `DpsBackendDatabases` handle is `Clone` (cloning it clones the underlying pools), so it can be moved
+> into tasks and other threads. The library's own query and service modules are also public if you
+> prefer to reuse them with a connection acquired from the pool.
+
+### Mounting host routes under the API path
+
+The session cookie is issued with `Path=/{api_path}` (e.g. `/api`) and `Domain=.{domain}`, so browsers
+only send it to requests under that path. The backend owns the root router, so host routes are merged
+into the backend's `{api_path}` sub-router with `enhance_api`. Host routes are passed as paths
+**relative to the API root** (e.g. `/profile`) and automatically inherit the backend's session,
+request-id, tracing, and CORS layers — no host-side middleware is needed.
+
+The only rule is that the host must not redefine an exact backend method + path (e.g. a duplicate
+`GET /auth/me`), which panics on merge. Distinct paths under `{api_path}` merge cleanly.
+
+```rust
+use axum::{extract::Extension, routing::get, Router};
+use dps_backend::middleware::session::SessionContext;
+use dps_backend::DpsBackend;
+use dps_config::DpsConfig;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = DpsConfig::new();
+    let backend = DpsBackend::new(config)?;
+
+    // Paths are relative to the API root; the session middleware is applied by the backend.
+    let host_api = Router::new().route("/profile", get(host_profile));
+
+    let app = backend.enhance_api(host_api).await?;
+    backend.serve(app).await?;
+    Ok(())
+}
+
+async fn host_profile(
+    Extension(session): Extension<SessionContext>,
+) -> &'static str {
+    if session.authenticated() {
+        "profile"
+    } else {
+        "anonymous"
+    }
+}
+```
+
+> Host handlers can extract `Extension<SessionContext>` to read the validated session, exactly like the
+> backend's own handlers.
+
+## Frontend
+
+The Vue 3 frontend lives in [`frontend/`](./frontend) and is served by the backend as an Inertia.js
+monolith. Pages are declared in `src/handlers/pages.rs` and mounted in `DpsBackend::build_root`;
+component files live under `frontend/src/Pages/`, with shared shells in `frontend/src/Layouts/`.
+
+Auth is client-side: the Inertia page shell carries no auth, and the Vue app resolves the session by
+calling `GET /{api_path}/auth/me`. The session cookie stays `HttpOnly` and scoped to `Path=/{api_path}`,
+so it is sent on that request but is not readable by JavaScript.
+
+Commands (run inside `frontend/`):
+
+- **Install**: `bun install`
+- **Dev server**: `bun run dev` (port `5000`; writes `frontend/hot`)
+- **Build**: `bun run build` (writes `frontend/dist`, including `.vite/manifest.json`)
+
+Asset resolution:
+
+- **Dev** (`DPS_DEVELOPMENT_MODE=Y`): the backend reads `frontend/hot` (or falls back to its hardcoded
+  `http://localhost:5000` default) and injects a module script tag pointing at the Vite dev server. No
+  `/build` static route is mounted.
+- **Prod**: the backend reads `frontend/dist/.vite/manifest.json`, injects the hashed
+  `/{base}{file}` script and CSS links into the root document, and serves `frontend/dist` under
+  `/build`.
+
+To add a page:
+
+1. Create `frontend/src/Pages/<Name>.vue`.
+2. Add a route/handler in `src/handlers/pages.rs` and mount it in `DpsBackend::build_root`.
+3. Update the "Frontend pages" table above.
+
+## Configuration
+
+The `DpsBackend` uses `DpsConfig` from the `dps-config` crate for configuration management.
+
+### Environment Variables
+
+All configuration is loaded from environment variables via `DpsConfig::new()`:
+
+- `DPS_DOMAIN`: Base domain (default: "dps.localhost")
+- `DPS_API_PATH`: API path, without leading slash (default: "api", meaning the backend serves at "/api")
+- `DPS_DEVELOPMENT_MODE`: Set to "Y" to enable development features (default: not defined)
+- `DPS_BACKEND_BIND_PORT`: Internal port `DpsBackend::serve` binds (default: 3000)
+- `PORT`: Generic, host-agnostic bind port used as a fallback by `DpsBackend::serve` (not Railway-specific)
+- `DPS_BACKEND_PORT`: Public port appended to generated backend URLs (omitted if unset)
+- `DPS_BACKEND_SQLITE_MAIN_FILE_PATH`: SQLite database file path (default: "data/main-development.db")
+- `DPS_BACKEND_SQLITE_MAIN_POOL_SIZE`: Database connection pool size (default: 1)
+- `DPS_BACKEND_SESSION_SECRET`: 32-byte secret for session encryption (required)
+- `DPS_BACKEND_INSECURE_COOKIE`: Set to "Y" to enable insecure cookies (default: false)
+
+`DpsBackend::serve` binds on the **internal** port resolved by `DpsConfig` in this order:
+`DPS_BACKEND_BIND_PORT`, then the generic `PORT` environment variable, then the default `3000`. This is
+separate from `DPS_BACKEND_PORT`, which is the **public** port used only when building URLs. Behind a
+proxy (e.g. Railway), set `PORT` as injected by the platform and leave `DPS_BACKEND_PORT` unset so URLs
+omit the internal port.
+
+Frontend asset resolution (asset base, dist path, hot file, entry, and dev-server URL) is fixed in code
+and coupled to the frontend build; it is not configurable via environment variables. Embedders can
+override it programmatically with `DpsBackend::with_frontend_config`.
+
+The cookie domain is automatically derived as `.{domain}` (e.g., ".dps.localhost").
+The cookie path is set to the `api_path` configuration with a leading slash (e.g., "/api").
+
+> `DpsConfig` is an external crate and exposes `backend_*` getters and `DPS_BACKEND_*` environment
+> variables.
+
+### Manual Configuration
+
+```rust
+let mut config = DpsConfig::new();
+config.set_backend_port(Some(8080));
+config.set_domain("example.com");
+config.set_backend_sqlite_main_pool_size(Some(10));
+let backend = DpsBackend::new(config)?;
+```
+
+All configuration options except `backend_session_secret` have sensible defaults and are optional.
+
+## Local Development
+
+For local development, set the environment variables (see the "Environment Variables" section) and run
+the example host binary:
+
+```bash
+# Set environment variables in .env file, then:
+cargo run --bin run_local_server
+```
+
+The example host (`scripts/run_local_server.rs`) contributes no API routes of its own; it calls
+`enhance_api(Router::new())` and then `backend.serve(app)`, which owns `axum::serve` and graceful
+shutdown. The backend owns `/`, `/health`, `/{api_path}`, and the fallback.
+
+## Database Setup
+
+The library provides a `dps-backend-migrate` binary for database setup and rollback.
+
+### Forward Migrations
+
+- Build (debug): `cargo build --bin dps-backend-migrate`
+- Build (release): `cargo build --release --bin dps-backend-migrate`
+- Run migrations (development): `cargo run --bin dps-backend-migrate`
+- Run with custom SQLite file: `cargo run --bin dps-backend-migrate -- --sqlite-file ./my-auth.db`
+- Production: `./target/release/dps-backend-migrate --sqlite-file ./production.db`
+
+### Migration Rollback
+
+Rollback the last migration:
+```bash
+cargo run --bin dps-backend-migrate -- --revert
+```
+
+Rollback multiple migrations:
+```bash
+cargo run --bin dps-backend-migrate -- --revert 3
+```
+
+Rollback in production:
+```bash
+./target/release/dps-backend-migrate --sqlite-file ./production.db --revert
+```
+
+**Important**: Rollback will automatically regenerate the schema dump after reverting migrations.
+
+Docker note:
+- Build the migration binary in your builder stage and run it before starting your app in the runtime stage. See the repo Dockerfile or docs for an example.
+
+### Configuration Methods
+
+1. **Environment Variables**:
+```bash
+export DPS_BACKEND_SQLITE_FILE="data/development.db"
+export DPS_BACKEND_MIGRATE_SKIP_SEEDS="false"
+```
+
+2. **Command-line Arguments**:
+   - `--sqlite-file <PATH>` - SQLite database file path
+   - `--skip-seeds` - Skip running seed files
+   - `--revert [N]` - Revert last N migrations (default: 1)
+   - `--help` - Show all available options
+
+## Development
+
+- Use `mise` for managing Rust toolchains and dependencies. See `.tool-versions` file for required versions.
+- To install `rust-analyzer`: `rustup component add rust-analyzer`
+  - This is recommended for IDE support (e.g., VSCode with Rust Analyzer extension).
+
+## License
+
+[MIT](./LICENSE)

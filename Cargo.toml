@@ -1,18 +1,19 @@
 [package]
-name = "dp-auth-service"
+name = "dps-backend"
 version = "0.1.0"
 edition = "2021"
-default-run = "dp-auth-service"
+authors = ["Dimensional Pocket <dpauth@dimensionalpocket.com>"]
+
+[workspace]
+members = ["crates/dps-backend-test-macros"]
 
 [dependencies]
-async-graphql = "7.0"
-async-graphql-axum = "7.0"
 axum = "0.8"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["cors"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -27,15 +28,27 @@ chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3.0"
 aes-gcm = "0.10"
 base64 = "0.22"
-dp-auth-session-service = { git = "https://github.com/dimensionalpocket/auth-session-service", tag = "0.1.0" }
+dps-auth-session = { git = "https://github.com/dimensionalpocket/dps-auth-session", tag = "0.3.0" }
+dps-config = { git = "https://github.com/dimensionalpocket/dps-config", branch = "dps-backend" }
+clap = { version = "4.0", features = ["derive", "env"] }
+inertia_rs = { version = "0.4.0", default-features = false, features = ["axum"] }
 
 [features]
 default = ["test-utils"]
 test-utils = []
 
 [dev-dependencies]
-tracing-test = "0.2"
+tracing-test = { version = "0.2", features = ["no-env-filter"] }
+urlencoding = "2.1"
+dps-backend-test-macros = { path = "crates/dps-backend-test-macros" }
+anyhow = "1.0"
 
+# Local development script
 [[bin]]
-name = "migrate_and_dump"
-path = "config/scripts/migrate_and_dump.rs"
+name = "run_local_server"
+path = "scripts/run_local_server.rs"
+
+# Database migration and setup tool
+[[bin]]
+name = "dps-backend-migrate"
+path = "config/scripts/dps_backend_migrate.rs"
