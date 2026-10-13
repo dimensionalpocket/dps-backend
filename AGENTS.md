@@ -66,6 +66,7 @@ When using the Edit tool to modify files:
 - Do not run commit/push commands without explicit permission from user. 
 - Usually the user will review the code manually after plans are finished, so never commit/push after implementing plans.
 - Do not use Git worktrees unless explicitly instructed to by user or plans.
+- Use semantic commit messages (feat:, fix:, etc) regardless of commit message history. Keep messages short and concise. No need for long descriptions in a new line.
 
 ## Project Structure
 
