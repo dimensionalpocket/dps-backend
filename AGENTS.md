@@ -63,8 +63,9 @@ When using the Edit tool to modify files:
 
 ### Git Access
 
-- You are not allowed to run any git commands.
-- If you need to revert a large amount of changes due to irreversible breakage (e.g., a Bun script going awry), STOP and ask the user to revert the changes.
+- Do not run commit/push commands without explicit permission from user. 
+- Usually the user will review the code manually after plans are finished, so never commit/push after implementing plans.
+- Do not use Git worktrees unless explicitly instructed to by user or plans.
 
 ## Project Structure
 
@@ -86,9 +87,10 @@ Domain usage is more of a way to organize code than strict boundaries. Cross-dom
 - HTTP request/response DTOs live in `src/types/http/`
 
 ### API Setup
-- The library is a monolith composable `axum` router. `DpsBackend` never binds a socket or starts a server.
+- The library is a monolith composable `axum` router.
 - `DpsBackend` owns the root router: the Inertia page routes at `/`, `GET /health`, `/{api_path}`, and the root fallback.
-- `DpsBackend::routes()` returns the full root router (no host routes); `DpsBackend::enhance_api(host_api).await?` merges host API routes (paths relative to the API root) into the `/{api_path}` sub-router and returns the root router. Host routes inherit the backend's session/request-id/tracing/CORS layers. The host owns `axum::serve` and graceful shutdown.
+- `DpsBackend::routes()` returns the full root router (no host routes); `DpsBackend::enhance_api(host_api).await?` merges host API routes (paths relative to the API root) into the `/{api_path}` sub-router and returns the root router. Host routes inherit the backend's session/request-id/tracing/CORS layers.
+- `DpsBackend` can optionally own the server: `serve(app)` binds `0.0.0.0:<bind port>` (resolved by `DpsConfig` as `DPS_BACKEND_BIND_PORT` -> `PORT` -> `3000`; distinct from the public `DPS_BACKEND_PORT`, which only feeds URLs) and `serve_listener(listener, app)` / `serve_with_shutdown(listener, app, signal)` cover custom listeners and shutdown. `routes()` / `enhance_api()` are still available for hosts that own `axum::serve` themselves.
 - API paths under `/{api_path}` return a plain-text `404 NOT FOUND`; other unknown paths render the Inertia `Error` page.
 - All API routes are nested under `/{api_path}` (default `/api`) and are declared in `src/dps_backend.rs::backend_api_router`.
 - Inertia page handlers live in `src/handlers/pages.rs`; REST handlers live in `src/handlers/`; the API is REST-only (no GraphQL).

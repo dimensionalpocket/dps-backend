@@ -1,8 +1,6 @@
 use axum::Router;
-use dps_backend::services::{LogShutdownStartService, WaitForShutdownSignalService};
 use dps_backend::DpsBackend;
 use dps_config::DpsConfig;
-use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Environment variable name fragments whose values must never be logged.
@@ -46,25 +44,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // DpsConfig::new() automatically loads from environment variables
   let config = DpsConfig::new();
-  let port = config.get_backend_port().unwrap_or(3000);
   let backend = DpsBackend::new(config)?;
 
-  // The host contributes only API routes; the backend owns the root.
+  // The host contributes only API routes; the backend owns the root router,
+  // `axum::serve`, and graceful shutdown.
   let host_api = Router::new();
   let app = backend.enhance_api(host_api).await?;
-
-  let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
-  println!("Server running on http://0.0.0.0:{port}");
-  axum::serve(listener, app)
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+  backend.serve(app).await?;
 
   Ok(())
-}
-
-async fn shutdown_signal() {
-  let signal = WaitForShutdownSignalService::run().await;
-  LogShutdownStartService::run(signal);
 }
 
 #[cfg(test)]

@@ -6,7 +6,9 @@ use axum::{
   Router,
 };
 use inertia_rs::axum::VersionLayer;
+use std::future::Future;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::sync::OnceCell;
 use tower::ServiceBuilder;
 use tower_http::{
@@ -14,7 +16,7 @@ use tower_http::{
   services::ServeDir,
   trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
-use tracing::Level;
+use tracing::{info, Level};
 
 /// Shared state passed to every backend route.
 #[derive(Clone)]
@@ -27,9 +29,10 @@ pub struct AppState {
 /// Embeddable backend that enhances a host-provided `axum::Router` with the
 /// DPS backend routes.
 ///
-/// The library never binds a socket or starts a server; the host owns
-/// `axum::serve` and graceful shutdown. The backend only contributes the
-/// `{api_path}`-prefixed routes and their middleware.
+/// The backend can optionally own `axum::serve` and graceful shutdown via the
+/// `serve*` methods. When the host needs full control over the listener (TLS,
+/// Unix sockets, socket options), use `routes()` / `enhance_api()` to obtain the
+/// root router and serve it directly.
 pub struct DpsBackend {
   pub(crate) config: Arc<dps_config::DpsConfig>,
   databases: OnceCell<DpsBackendDatabases>,
@@ -172,7 +175,7 @@ impl DpsBackend {
   ///
   /// The backend owns `/health`, the Inertia page routes at `/`, the REST API
   /// under `/{api_path}`, and the root fallback. The returned router is not
-  /// bound to a port; the host calls `axum::serve`.
+  /// bound to a port; pass it to a `serve*` method or serve it yourself.
   pub async fn routes(&self) -> Result<Router, DpsBackendError> {
     self.build_root(Router::new()).await
   }
@@ -185,6 +188,71 @@ impl DpsBackend {
   /// panics on merge.
   pub async fn enhance_api(&self, host_api: Router<AppState>) -> Result<Router, DpsBackendError> {
     self.build_root(host_api).await
+  }
+
+  /// Bind the router to `0.0.0.0:<bind port>` and serve it with graceful
+  /// shutdown on SIGINT/SIGTERM.
+  ///
+  /// The bind port comes from [`dps_config::DpsConfig::get_backend_bind_port`]
+  /// (`DPS_BACKEND_BIND_PORT` -> `PORT` -> `3000`) and is the *internal* port the
+  /// process listens on. It is distinct from the *public* `DPS_BACKEND_PORT`,
+  /// which is only appended to generated URLs.
+  ///
+  /// Convenience over [`DpsBackend::serve_listener`] for the common case. Use
+  /// `routes()` / `enhance_api()` and `serve_listener` when you need to control
+  /// the bind address, TLS termination, or the socket type.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`DpsBackendError::NetworkError`] if the bind or the server loop fails.
+  pub async fn serve(&self, app: Router) -> Result<(), DpsBackendError> {
+    let port = self.config.get_backend_bind_port();
+    let addr = format!("0.0.0.0:{port}");
+    let listener = TcpListener::bind(&addr)
+      .await
+      .map_err(|e| DpsBackendError::NetworkError(e.to_string()))?;
+    info!("Server running on http://{addr}");
+    self.serve_listener(listener, app).await
+  }
+
+  /// Serve a router on a caller-provided listener with the default
+  /// SIGINT/SIGTERM graceful shutdown.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`DpsBackendError::NetworkError`] if the server loop fails.
+  pub async fn serve_listener(
+    &self,
+    listener: TcpListener,
+    app: Router,
+  ) -> Result<(), DpsBackendError> {
+    self
+      .serve_with_shutdown(listener, app, default_shutdown_signal())
+      .await
+  }
+
+  /// Serve a router on a caller-provided listener with a caller-provided
+  /// shutdown future.
+  ///
+  /// The future resolves when the server should stop accepting connections and
+  /// wait for in-flight requests to finish.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`DpsBackendError::NetworkError`] if the server loop fails.
+  pub async fn serve_with_shutdown<F>(
+    &self,
+    listener: TcpListener,
+    app: Router,
+    signal: F,
+  ) -> Result<(), DpsBackendError>
+  where
+    F: Future<Output = ()> + Send + 'static,
+  {
+    axum::serve(listener, app)
+      .with_graceful_shutdown(signal)
+      .await
+      .map_err(|e| DpsBackendError::NetworkError(e.to_string()))
   }
 
   async fn build_root(&self, host_api: Router<AppState>) -> Result<Router, DpsBackendError> {
@@ -299,6 +367,13 @@ impl DpsBackend {
   }
 }
 
+/// Default graceful-shutdown future: resolves on SIGINT/SIGTERM and logs the
+/// reason via the backend's own shutdown services.
+async fn default_shutdown_signal() {
+  let signal = crate::services::WaitForShutdownSignalService::run().await;
+  crate::services::LogShutdownStartService::run(signal);
+}
+
 /// Backend REST routes, relative to the `{api_path}` root (declarations only;
 /// layers are applied by [`DpsBackend::build_root`]).
 fn backend_api_router() -> Router<AppState> {
@@ -366,6 +441,8 @@ mod tests {
   use std::fs;
   use std::path::PathBuf;
   use tempfile::{NamedTempFile, TempDir};
+  use tokio::io::{AsyncReadExt, AsyncWriteExt};
+  use tokio::sync::oneshot;
   use tower::ServiceExt;
 
   fn dev_frontend_config() -> FrontendConfig {
@@ -712,5 +789,77 @@ mod tests {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(body_string(response).await, "console.log('hi')");
+  }
+
+  #[dps_backend_db_test]
+  async fn test_serve_with_shutdown_stops_on_signal() {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+
+    let backend = create_test_backend(db_path);
+    let app = backend.routes().await.unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (tx, rx) = oneshot::channel::<()>();
+
+    let server = tokio::spawn(async move {
+      backend
+        .serve_with_shutdown(listener, app, async move {
+          let _ = rx.await;
+        })
+        .await
+    });
+
+    tx.send(()).unwrap();
+    let result = server.await.unwrap();
+    assert!(result.is_ok());
+  }
+
+  #[dps_backend_db_test]
+  async fn test_serve_with_shutdown_custom_future() {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+
+    let backend = create_test_backend(db_path);
+    let app = backend.routes().await.unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let result = backend
+      .serve_with_shutdown(listener, app, std::future::ready(()))
+      .await;
+
+    assert!(result.is_ok());
+  }
+
+  #[dps_backend_db_test]
+  async fn test_serve_listener_serves_requests() {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+
+    let backend = create_test_backend(db_path);
+    let app = backend.routes().await.unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move { backend.serve_listener(listener, app).await });
+
+    let mut response = String::new();
+    for _ in 0..50 {
+      match tokio::net::TcpStream::connect(addr).await {
+        Ok(mut stream) => {
+          let request =
+            "GET /api/server-timestamp HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+          stream.write_all(request.as_bytes()).await.unwrap();
+          stream.read_to_string(&mut response).await.unwrap();
+          break;
+        }
+        Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+      }
+    }
+
+    assert!(response.contains("200"), "response was: {response}");
+
+    server.abort();
   }
 }

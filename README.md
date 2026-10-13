@@ -7,10 +7,12 @@ composable: it serves an [Inertia.js](https://inertiajs.com/) Vue frontend from 
 the `/health` endpoint, and exposes a REST API under `/{api_path}`.
 
 It can be deployed on its own as a service with a volume to house the SQLite databases, but it can also
-be embedded into a larger `axum` application. The library **never binds a socket**: the host owns
-`axum::serve` and graceful shutdown. A host can merge its own API routes into the `{api_path}` namespace
-via `DpsBackend::enhance_api`, and those routes inherit the backend's session, request-id, tracing, and
-CORS layers.
+be embedded into a larger `axum` application. The backend can optionally own `axum::serve` and graceful
+shutdown via `DpsBackend::serve`; hosts that need full control over the listener (TLS termination, Unix
+sockets, socket options) can instead build the router with `DpsBackend::routes` / `enhance_api` and serve
+it themselves. A host can merge its own API routes into the `{api_path}` namespace via
+`DpsBackend::enhance_api`, and those routes inherit the backend's session, request-id, tracing, and CORS
+layers.
 
 The backend owns the root router (`/`, `/health`, `/{api_path}`, and the fallback). API paths return a
 plain-text `404 NOT FOUND`; any other unknown path renders the Inertia `Error` page.
@@ -23,7 +25,8 @@ plain-text `404 NOT FOUND`; any other unknown path renders the Inertia `Error` p
 - Session token management with encrypted tokens
 - Password hashing with Argon2
 - SQLite database with migrations
-- Composable router: merge host API routes with `enhance_api` without owning the listener
+- Composable router: merge host API routes with `enhance_api`
+- Optional server ownership: `serve`/`serve_listener`/`serve_with_shutdown` handle `axum::serve` and graceful shutdown
 - Shared database handles exposed to the host for custom queries and data changes
 
 ## Frontend pages
@@ -136,7 +139,6 @@ dps-backend = { git = "https://github.com/dimensionalpocket/dps-backend", tag = 
 use axum::Router;
 use dps_backend::DpsBackend;
 use dps_config::DpsConfig;
-use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -150,9 +152,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let host_api = Router::new();
     let app = backend.enhance_api(host_api).await?;
 
-    // The host owns the listener and graceful shutdown.
-    let listener = TcpListener::bind("0.0.0.0:3000").await?;
-    axum::serve(listener, app).await?;
+    // The backend binds `0.0.0.0:<bind port>` (DPS_BACKEND_BIND_PORT -> PORT -> 3000)
+    // and handles graceful shutdown on SIGINT/SIGTERM.
+    backend.serve(app).await?;
     Ok(())
 }
 ```
@@ -161,6 +163,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 > redefine an exact backend method + path (e.g. a duplicate `GET /auth/me`), which panics on merge.
 > Distinct paths merge cleanly. See
 > [Mounting host routes under the API path](#mounting-host-routes-under-the-api-path).
+
+### Serving the app
+
+`serve` is the one-liner: it binds `0.0.0.0` on the resolved **bind** port (`DPS_BACKEND_BIND_PORT` ->
+`PORT` -> `3000`) and shuts down gracefully on SIGINT/SIGTERM. This bind port is internal and separate
+from the **public** `DPS_BACKEND_PORT`, which only appears in generated URLs. For more control, use a
+caller-owned listener:
+
+```rust
+use tokio::net::TcpListener;
+
+// Caller-owned listener (loopback, Unix socket, TLS front proxy, ...);
+// the backend still owns `axum::serve` and the default SIGINT/SIGTERM shutdown.
+let listener = TcpListener::bind("127.0.0.1:3000").await?;
+backend.serve_listener(listener, app).await?;
+```
+
+```rust
+// Caller-owned listener and shutdown future (e.g. drain background tasks first).
+let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+tokio::spawn(async move { let _ = tx.send(()); });
+backend
+    .serve_with_shutdown(listener, app, async move {
+        let _ = rx.await;
+    })
+    .await?;
+```
+
+Hosts that want to own `axum::serve` too can skip the `serve*` methods entirely and pass the router
+from `routes()` / `enhance_api()` to their own server.
 
 ### Full example (complete configuration)
 
@@ -185,8 +217,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // `backend.routes().await?` returns the bare root router (no host routes).
     let app = backend.enhance_api(axum::Router::new()).await?;
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    axum::serve(listener, app).await?;
+    backend.serve(app).await?;
     Ok(())
 }
 ```
@@ -223,8 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _session_pool = databases.session();
 
     let app = backend.enhance_api(axum::Router::new()).await?;
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    axum::serve(listener, app).await?;
+    backend.serve(app).await?;
     Ok(())
 }
 ```
@@ -260,9 +290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let host_api = Router::new().route("/profile", get(host_profile));
 
     let app = backend.enhance_api(host_api).await?;
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    axum::serve(listener, app).await?;
+    backend.serve(app).await?;
     Ok(())
 }
 
@@ -322,11 +350,19 @@ All configuration is loaded from environment variables via `DpsConfig::new()`:
 - `DPS_DOMAIN`: Base domain (default: "dps.localhost")
 - `DPS_API_PATH`: API path, without leading slash (default: "api", meaning the backend serves at "/api")
 - `DPS_DEVELOPMENT_MODE`: Set to "Y" to enable development features (default: not defined)
-- `DPS_BACKEND_PORT`: Server port used by the example host binary (default: 3000 if not set)
+- `DPS_BACKEND_BIND_PORT`: Internal port `DpsBackend::serve` binds (default: 3000)
+- `PORT`: Generic, host-agnostic bind port used as a fallback by `DpsBackend::serve` (not Railway-specific)
+- `DPS_BACKEND_PORT`: Public port appended to generated backend URLs (omitted if unset)
 - `DPS_BACKEND_SQLITE_MAIN_FILE_PATH`: SQLite database file path (default: "data/main-development.db")
 - `DPS_BACKEND_SQLITE_MAIN_POOL_SIZE`: Database connection pool size (default: 1)
 - `DPS_BACKEND_SESSION_SECRET`: 32-byte secret for session encryption (required)
 - `DPS_BACKEND_INSECURE_COOKIE`: Set to "Y" to enable insecure cookies (default: false)
+
+`DpsBackend::serve` binds on the **internal** port resolved by `DpsConfig` in this order:
+`DPS_BACKEND_BIND_PORT`, then the generic `PORT` environment variable, then the default `3000`. This is
+separate from `DPS_BACKEND_PORT`, which is the **public** port used only when building URLs. Behind a
+proxy (e.g. Railway), set `PORT` as injected by the platform and leave `DPS_BACKEND_PORT` unset so URLs
+omit the internal port.
 
 Frontend asset resolution (asset base, dist path, hot file, entry, and dev-server URL) is fixed in code
 and coupled to the frontend build; it is not configurable via environment variables. Embedders can
@@ -361,8 +397,8 @@ cargo run --bin run_local_server
 ```
 
 The example host (`scripts/run_local_server.rs`) contributes no API routes of its own; it calls
-`enhance_api(Router::new())`, owns `axum::serve`, and handles graceful shutdown. The backend owns `/`,
-`/health`, `/{api_path}`, and the fallback.
+`enhance_api(Router::new())` and then `backend.serve(app)`, which owns `axum::serve` and graceful
+shutdown. The backend owns `/`, `/health`, `/{api_path}`, and the fallback.
 
 ## Database Setup
 
