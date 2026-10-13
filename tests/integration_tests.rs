@@ -48,7 +48,8 @@ async fn test_root_endpoint() {
   let body = axum::body::to_bytes(response.into_body(), usize::MAX)
     .await
     .unwrap();
-  assert_eq!(&body[..], b"OK");
+  let body = String::from_utf8(body.to_vec()).unwrap();
+  assert!(body.contains("data-page=\"app\""));
 }
 
 #[tokio::test]
@@ -122,7 +123,7 @@ async fn test_register_returns_created_with_cookie() {
     .to_str()
     .unwrap()
     .to_string();
-  assert!(cookie.contains("DpsAuthSession="));
+  assert!(cookie.contains("DpsSession="));
   assert!(cookie.contains("Domain=.dps.localhost"));
   assert!(cookie.contains("Path=/api"));
   assert!(cookie.contains("HttpOnly"));
@@ -270,7 +271,7 @@ async fn test_auth_me_invalid_token_is_unauthorized() {
 }
 
 #[tokio::test]
-async fn test_404_handler_returns_not_found() {
+async fn test_404_handler_renders_inertia_error_page() {
   let app = create_app().await;
 
   let response = app
@@ -287,7 +288,8 @@ async fn test_404_handler_returns_not_found() {
   let body = axum::body::to_bytes(response.into_body(), usize::MAX)
     .await
     .unwrap();
-  assert_eq!(&body[..], b"NOT FOUND");
+  let body = String::from_utf8(body.to_vec()).unwrap();
+  assert!(body.contains("\"component\":\"Error\"") || body.contains("\"component\": \"Error\""));
 }
 
 #[test]
@@ -319,5 +321,5 @@ fn test_session_context_utility_methods() {
 #[test]
 fn test_session_cookie_name_constant() {
   use dps_backend::middleware::session::SESSION_COOKIE_NAME;
-  assert_eq!(SESSION_COOKIE_NAME, "DpsAuthSession");
+  assert_eq!(SESSION_COOKIE_NAME, "DpsSession");
 }

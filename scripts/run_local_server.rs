@@ -1,20 +1,36 @@
-use axum::{http::StatusCode, routing::get, Router};
+use axum::Router;
 use dps_backend::services::{LogShutdownStartService, WaitForShutdownSignalService};
 use dps_backend::DpsBackend;
 use dps_config::DpsConfig;
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Environment variable name fragments whose values must never be logged.
+const SENSITIVE_KEY_FRAGMENTS: &[&str] = &["SECRET", "PASSWORD", "TOKEN", "API_KEY"];
+
+/// Returns `true` when an environment variable's value is sensitive and must be
+/// redacted from logs.
+fn is_sensitive_key(key: &str) -> bool {
+  let upper = key.to_ascii_uppercase();
+  SENSITIVE_KEY_FRAGMENTS
+    .iter()
+    .any(|fragment| upper.contains(fragment))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Load environment variables from .env file for local development
   dotenvy::dotenv().ok();
 
-  // Print DPS_ environment variables for debugging
+  // Print DPS_ environment variables for debugging (sensitive values redacted)
   println!("=== DPS Configuration Variables ===");
   for (key, value) in std::env::vars() {
     if key.starts_with("DPS_") {
-      println!("{key}: {value}");
+      if is_sensitive_key(&key) {
+        println!("{key}: [redacted]");
+      } else {
+        println!("{key}: {value}");
+      }
     }
   }
   println!("====================================\n");
@@ -33,14 +49,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let port = config.get_backend_port().unwrap_or(3000);
   let backend = DpsBackend::new(config)?;
 
-  // The host owns the root, health check, and fallback routes.
-  let host = Router::new()
-    .route("/", get(|| async { "OK" }))
-    .route("/health", get(|| async { "OK" }))
-    .fallback(not_found);
-
-  // Enhance the host router with the backend's `{api_path}` routes.
-  let app = backend.enhance(host).await?;
+  // The host contributes only API routes; the backend owns the root.
+  let host_api = Router::new();
+  let app = backend.enhance_api(host_api).await?;
 
   let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
   println!("Server running on http://0.0.0.0:{port}");
@@ -49,10 +60,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
   Ok(())
-}
-
-async fn not_found() -> (StatusCode, &'static str) {
-  (StatusCode::NOT_FOUND, "NOT FOUND")
 }
 
 async fn shutdown_signal() {
@@ -64,10 +71,18 @@ async fn shutdown_signal() {
 mod tests {
   use super::*;
 
-  #[tokio::test]
-  async fn test_not_found_handler_returns_404() {
-    let (status, message) = not_found().await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(message, "NOT FOUND");
+  #[test]
+  fn test_is_sensitive_key_redacts_secrets() {
+    assert!(is_sensitive_key("DPS_BACKEND_SESSION_SECRET"));
+    assert!(is_sensitive_key("DPS_BACKEND_SESSION_PASSWORD"));
+    assert!(is_sensitive_key("SOME_TOKEN"));
+    assert!(is_sensitive_key("MY_API_KEY"));
+  }
+
+  #[test]
+  fn test_is_sensitive_key_allows_config() {
+    assert!(!is_sensitive_key("DPS_BACKEND_PORT"));
+    assert!(!is_sensitive_key("DPS_API_PATH"));
+    assert!(!is_sensitive_key("DPS_BACKEND_SQLITE_MAIN_FILE_PATH"));
   }
 }

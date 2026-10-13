@@ -7,14 +7,17 @@
 
 ## Build/Lint/Test Commands
 
-- **Build**: `cargo build`
-- **Build release**: `cargo build --release`
-- **Test all**: `cargo test --quiet`
-- **Test single test**: `RUST_BACKTRACE=1 cargo test <test_name> --quiet`
+Run every Rust command through mise by default: prefix `cargo`/`rustc` with `mise exec --`
+(e.g. `mise exec -- cargo test`). The bare `rustc`/`cargo` on PATH may be a different toolchain.
+
+- **Build**: `mise exec -- cargo build`
+- **Build release**: `mise exec -- cargo build --release`
+- **Test all**: `mise exec -- cargo test --quiet`
+- **Test single test**: `RUST_BACKTRACE=1 mise exec -- cargo test <test_name> --quiet`
   - Note: never use `--verbose` as it clutters output
-- **Linter**: `cargo clippy --allow-dirty --fix && cargo fmt`
-- **Run local server**: `cargo run --bin run_local_server`
-- **Database migrations**: `cargo run --bin dps-backend-migrate`
+- **Linter**: `mise exec -- cargo clippy --allow-dirty --fix && mise exec -- cargo fmt`
+- **Run local server**: `mise exec -- cargo run --bin run_local_server`
+- **Database migrations**: `mise exec -- cargo run --bin dps-backend-migrate`
 
 ## Working Guidelines
 
@@ -27,7 +30,7 @@
 - Save plans in `docs/llm/plans/YYYY/MM/` directory structure
 - Name files as `DD-task-name.md` (day + dash + lowercase task with dashes)
 - Include implementation details: files to modify/create, code samples for new functions
-- If applicable, suggest existing crates that can help with the implementation during plan creation; if multiple crates exist, list pros/cons and recommend one
+- If applicable, suggest existing dependencies that can help with the implementation during plan creation; if multiple dependencies exist, list pros/cons and recommend one
 - Never include git operations, changelogs, PR descriptions, version bumps, or release notes in plans
 - Never worry about backwards compatibility if the version is pre-1.0.0
 - If the plan involves creating, updating, or deleting REST handlers/routes, add a final phase on the plan to update the `README.md` REST endpoint table after all implementation is done
@@ -83,10 +86,13 @@ Domain usage is more of a way to organize code than strict boundaries. Cross-dom
 - HTTP request/response DTOs live in `src/types/http/`
 
 ### API Setup
-- The library is an embeddable `axum` router. `DpsBackend` never binds a socket or starts a server.
-- The host application provides a `Router` and calls `DpsBackend::enhance(router).await?`; the host owns `axum::serve`, `GET /`, `GET /health`, and the fallback.
-- All backend routes are nested under `/{api_path}` (default `/api`) and are declared in `src/dps_backend.rs::DpsBackend::routes`.
-- REST handlers live in `src/handlers/`; the API is REST-only (no GraphQL).
+- The library is a monolith composable `axum` router. `DpsBackend` never binds a socket or starts a server.
+- `DpsBackend` owns the root router: the Inertia page routes at `/`, `GET /health`, `/{api_path}`, and the root fallback.
+- `DpsBackend::routes()` returns the full root router (no host routes); `DpsBackend::enhance_api(host_api).await?` merges host API routes (paths relative to the API root) into the `/{api_path}` sub-router and returns the root router. Host routes inherit the backend's session/request-id/tracing/CORS layers. The host owns `axum::serve` and graceful shutdown.
+- API paths under `/{api_path}` return a plain-text `404 NOT FOUND`; other unknown paths render the Inertia `Error` page.
+- All API routes are nested under `/{api_path}` (default `/api`) and are declared in `src/dps_backend.rs::backend_api_router`.
+- Inertia page handlers live in `src/handlers/pages.rs`; REST handlers live in `src/handlers/`; the API is REST-only (no GraphQL).
+- Frontend asset resolution lives in `src/frontend/` (`FrontendConfig`, `FrontendAssets`) and the Vue app lives in `frontend/`.
 
 ### Middleware
 - Middlewares live in `src/middleware/`
@@ -213,7 +219,7 @@ async fn test_something() {
 
 ### General
 - Bias towards simplicity
-- Do not install any new crates unless they are specified in the plan
+- Do not install any new dependencies unless they are specified in the plan
 
 ### Formatting
 - Follow the rules configured in `rustfmt.toml`

@@ -32,7 +32,7 @@ mod tests {
     config.set_backend_insecure_cookie(false);
     let cookie = GenerateLogoutCookieService::run(&config);
 
-    assert!(cookie.starts_with("DpsAuthSession=;"));
+    assert!(cookie.starts_with("DpsSession=;"));
     assert!(cookie.contains("Domain=.example.com"));
     assert!(cookie.contains("Path=/api"));
     assert!(cookie.contains("HttpOnly"));

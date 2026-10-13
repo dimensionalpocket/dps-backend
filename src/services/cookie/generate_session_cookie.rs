@@ -34,7 +34,7 @@ mod tests {
     config.set_backend_insecure_cookie(false);
     let cookie = GenerateSessionCookieService::run(&config, "test-token");
 
-    assert!(cookie.starts_with("DpsAuthSession=test-token;"));
+    assert!(cookie.starts_with("DpsSession=test-token;"));
     assert!(cookie.contains("Domain=.example.com"));
     assert!(cookie.contains("Path=/api"));
     assert!(cookie.contains("HttpOnly"));
@@ -51,7 +51,7 @@ mod tests {
 
     let cookie = GenerateSessionCookieService::run(&config, "test-token");
 
-    assert!(cookie.contains("DpsAuthSession=test-token;"));
+    assert!(cookie.contains("DpsSession=test-token;"));
     assert!(!cookie.contains("Secure"));
   }
 }

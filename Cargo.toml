@@ -13,7 +13,7 @@ tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -31,6 +31,7 @@ base64 = "0.22"
 dps-auth-session = { git = "https://github.com/dimensionalpocket/dps-auth-session", tag = "0.3.0" }
 dps-config = { git = "https://github.com/dimensionalpocket/dps-config", branch = "dps-backend" }
 clap = { version = "4.0", features = ["derive", "env"] }
+inertia_rs = { version = "0.4.0", default-features = false, features = ["axum"] }
 
 [features]
 default = ["test-utils"]

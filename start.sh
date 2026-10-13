@@ -5,6 +5,10 @@
 # Exit on any error
 set -e
 
+# Hosts like Railway inject the listening port as PORT; DpsConfig reads
+# DPS_BACKEND_PORT. An explicit DPS_BACKEND_PORT always wins.
+export DPS_BACKEND_PORT="${DPS_BACKEND_PORT:-${PORT:-3000}}"
+
 # Function to handle signals and forward them to the service
 cleanup() {
     local signal=$1

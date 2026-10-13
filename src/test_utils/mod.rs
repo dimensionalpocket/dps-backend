@@ -301,11 +301,15 @@ pub async fn create_test_role_model_with_conn(
   CreateRoleQuery::run(main_conn, create_data).await.unwrap()
 }
 
-/// Build a fully-migrated, seeded backend router merged into a minimal host
-/// router. No TCP listener is opened.
+/// Build a fully-migrated, seeded backend root router. No TCP listener is
+/// opened.
+///
+/// The frontend runs in dev mode with a nonexistent hot file, so no frontend
+/// build is required.
 pub async fn create_test_app() -> axum::Router {
   use crate::dps_backend::DpsBackend;
-  use axum::routing::get;
+  use crate::frontend::FrontendConfig;
+  use std::path::PathBuf;
 
   let temp_file = tempfile::Builder::new()
     .prefix("dps_backend_test_")
@@ -326,22 +330,25 @@ pub async fn create_test_app() -> axum::Router {
   config.set_backend_sqlite_session_file_path(":memory:");
   config.set_domain("dps.localhost");
 
-  let backend = DpsBackend::new(config).expect("Failed to create test backend");
+  let frontend_config = FrontendConfig {
+    dev_mode: true,
+    base: "/build/".to_string(),
+    dist_path: PathBuf::from("frontend/dist"),
+    hot_file_path: PathBuf::from("frontend/does-not-exist-hot"),
+    entry: "src/main.ts".to_string(),
+    dev_server_url: "http://localhost:5000".to_string(),
+  };
+
+  let backend = DpsBackend::new(config)
+    .expect("Failed to create test backend")
+    .with_frontend_config(frontend_config);
   backend
     .migrate_database()
     .await
     .expect("Failed to run migrations");
   backend.seed_database().await.expect("Failed to run seeds");
 
-  let host = axum::Router::new()
-    .route("/", get(|| async { "OK" }))
-    .route("/health", get(|| async { "OK" }))
-    .fallback(|| async { (axum::http::StatusCode::NOT_FOUND, "NOT FOUND") });
-
-  backend
-    .enhance(host)
-    .await
-    .expect("Failed to build test app")
+  backend.routes().await.expect("Failed to build test app")
 }
 
 /// Create a test user through the REST registration endpoint.

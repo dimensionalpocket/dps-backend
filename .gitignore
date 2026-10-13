@@ -2,6 +2,11 @@ data/
 target/
 .env
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/hot
+
 # Executables copied to project root for testing
 run_local_server
 dps-backend-migrate

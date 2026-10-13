@@ -1,6 +1,7 @@
 pub mod controllers;
 pub mod database;
 pub mod dps_backend;
+pub mod frontend;
 pub mod handlers;
 pub mod middleware;
 pub mod migration_config;
@@ -12,4 +13,4 @@ pub mod types;
 pub mod utils;
 
 pub use database::{DpsBackendDatabases, MainDatabase};
-pub use dps_backend::{DpsBackend, DpsBackendError};
+pub use dps_backend::{AppState, DpsBackend, DpsBackendError};

@@ -2,23 +2,53 @@
 
 [![Rust Tests](https://github.com/dimensionalpocket/dps-backend/actions/workflows/test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-backend/actions/workflows/test.yml) [![Docker Build Test](https://github.com/dimensionalpocket/dps-backend/actions/workflows/docker-build-test.yml/badge.svg)](https://github.com/dimensionalpocket/dps-backend/actions/workflows/docker-build-test.yml)
 
-An opinionated authentication, user management, and session handling backend, exposed as an embeddable
-`axum` REST router.
+An opinionated authentication, user management, and session handling backend, packaged as a monolith
+composable: it serves an [Inertia.js](https://inertiajs.com/) Vue frontend from the root path `/`, owns
+the `/health` endpoint, and exposes a REST API under `/{api_path}`.
 
-It is intended to be deployed as a microservice with a volume to house the SQLite databases, but it can
-also be embedded into a larger `axum` application. The library **never binds a socket**: it enhances a
-host-provided router with its own `{api_path}`-prefixed routes, and the host owns `axum::serve` and
-graceful shutdown.
+It is intended to be deployed as a service with a volume to house the SQLite databases, but it can also
+be embedded into a larger `axum` application. The library **never binds a socket**: the host owns
+`axum::serve` and graceful shutdown. A host can merge its own API routes into the `{api_path}` namespace
+via `DpsBackend::enhance_api`, and those routes inherit the backend's session, request-id, tracing, and
+CORS layers.
+
+The backend owns the root router (`/`, `/health`, `/{api_path}`, and the fallback). API paths return a
+plain-text `404 NOT FOUND`; any other unknown path renders the Inertia `Error` page.
 
 ## Features
 
+- Inertia.js frontend served from `/` (Vite-built, code-split pages)
 - REST API with authentication, user, role, and site endpoints
 - User management with role-based permissions
 - Session token management with encrypted tokens
 - Password hashing with Argon2
 - SQLite database with migrations
-- Embeddable router: enhance any host `axum::Router` without owning the listener
+- Composable router: merge host API routes with `enhance_api` without owning the listener
 - Shared database handles exposed to the host for custom queries and data changes
+
+## Frontend pages
+
+The Inertia page routes are served from the root path and are auth-agnostic shells. Auth is resolved
+client-side by the Vue app; "Guard" below is a client-side guard.
+
+| Method | Path | Inertia component | Guard |
+|--------|------|-------------------|-------|
+| `GET` | `/` | `Home` | auth |
+| `GET` | `/login` | `Auth/Login` | none |
+| `GET` | `/register` | `Auth/Register` | none |
+| `GET` | `/login-success` | `Auth/LoginSuccess` | auth |
+| `GET` | `/password-change` | `Auth/PasswordChange` | auth |
+| `GET` | `/admin` | `Admin/Home` | admin |
+| `GET` | `/admin/users` | `Admin/Users` | admin |
+| `GET` | `/admin/sites` | `Admin/Sites` | admin |
+| `GET` | `/admin/sites/new` | `Admin/SitesNew` | admin |
+| `GET` | `/admin/sites/{id}/edit` | `Admin/SitesEdit` | admin (props: `{id}`) |
+| `GET` | `/health` | — (plain `"OK"`) | none |
+| — | fallback (non-API) | `Error` (`404`) | none |
+
+In production the compiled assets are served from `/build/` via `ServeDir(frontend/dist)`; in
+development the Vite dev server (port `5000`) serves them and writes `frontend/hot` for the backend to
+resolve.
 
 ## API Endpoints
 
@@ -100,10 +130,10 @@ dps-backend = { git = "https://github.com/dimensionalpocket/dps-backend", tag = 
 
 ## Usage
 
-### Quickstart (embeddable router)
+### Quickstart (monolith composable)
 
 ```rust
-use axum::{routing::get, Router};
+use axum::Router;
 use dps_backend::DpsBackend;
 use dps_config::DpsConfig;
 use tokio::net::TcpListener;
@@ -115,21 +145,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = DpsConfig::new();
     let backend = DpsBackend::new(config)?;
 
-    // The host owns the listener, root, health check, fallback, and graceful shutdown.
-    let host = Router::new()
-        .route("/", get(|| async { "OK" }))
-        .route("/health", get(|| async { "OK" }));
+    // The backend owns `/`, `/health`, `/{api_path}`, and the fallback.
+    // The host contributes only its own API routes (paths relative to the API root).
+    let host_api = Router::new();
+    let app = backend.enhance_api(host_api).await?;
 
-    let app = backend.enhance(host).await?;
-
+    // The host owns the listener and graceful shutdown.
     let listener = TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
 ```
 
-> Embedders may add their own routes under the backend's `{api_path}` namespace, as long as they do not
-> redefine an exact backend method + path (e.g. a duplicate `GET /api/auth/me`), which panics on merge.
+> Hosts may add their own routes under the backend's `{api_path}` namespace, as long as they do not
+> redefine an exact backend method + path (e.g. a duplicate `GET /auth/me`), which panics on merge.
 > Distinct paths merge cleanly. See
 > [Mounting host routes under the API path](#mounting-host-routes-under-the-api-path).
 
@@ -154,9 +183,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let backend = DpsBackend::new(config)?;
 
-    // `backend.routes::<()>().await?` returns just the `{api_path}` routes if you
-    // prefer to merge them yourself, or use `backend.enhance(host).await?`.
-    let app = backend.enhance(axum::Router::new()).await?;
+    // `backend.routes().await?` returns the bare root router (no host routes).
+    let app = backend.enhance_api(axum::Router::new()).await?;
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -180,7 +208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = DpsBackend::new(config)?;
 
     // Lazily created on first call and cached; the same instance is used by
-    // `migrate_database()`, `seed_database()`, and `routes()`/`enhance()`.
+    // `migrate_database()`, `seed_database()`, and `routes()`/`enhance_api()`.
     let databases = backend.databases().await?;
 
     // Acquire a connection from either pool.
@@ -194,7 +222,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Session data is available through `databases.session()`.
     let _session_pool = databases.session();
 
-    let app = backend.enhance(axum::Router::new()).await?;
+    let app = backend.enhance_api(axum::Router::new()).await?;
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -209,52 +237,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Mounting host routes under the API path
 
 The session cookie is issued with `Path=/{api_path}` (e.g. `/api`) and `Domain=.{domain}`, so browsers
-only send it to requests under that path. If the host app needs its own routes to receive — and
-validate — the same session cookie, mount them under the backend's `{api_path}` and apply the backend's
-session middleware to them.
+only send it to requests under that path. The backend owns the root router, so host routes are merged
+into the backend's `{api_path}` sub-router with `enhance_api`. Host routes are passed as paths
+**relative to the API root** (e.g. `/profile`) and automatically inherit the backend's session,
+request-id, tracing, and CORS layers — no host-side middleware is needed.
 
-Two rules keep the host and backend stacks fully isolated:
-
-- Apply your own layers to your routes **before** calling `backend.enhance(...)`. `Router::layer` only
-  affects routes registered before the call, and `enhance` merges the backend routes afterwards, so host
-  layers never wrap backend routes and backend layers never wrap host routes.
-- Do not redefine an exact backend method + path. Distinct paths under `{api_path}` merge cleanly; an
-  exact duplicate panics.
-
-Use `DpsConfig::get_api_path()` for the mount prefix and `create_session_middleware` (public) for the
-middleware. `DpsConfig` is not `Clone`, so read both values before moving the config into
-`DpsBackend::new`.
+The only rule is that the host must not redefine an exact backend method + path (e.g. a duplicate
+`GET /auth/me`), which panics on merge. Distinct paths under `{api_path}` merge cleanly.
 
 ```rust
-use axum::{extract::Extension, middleware::from_fn, routing::get, Router};
-use dps_backend::middleware::session::{create_session_middleware, SessionContext};
+use axum::{extract::Extension, routing::get, Router};
+use dps_backend::middleware::session::SessionContext;
 use dps_backend::DpsBackend;
 use dps_config::DpsConfig;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = DpsConfig::new();
-
-    // Read the values the host needs before the config is moved into the backend.
-    let session_secret = config
-        .get_backend_session_secret_bytes()
-        .expect("DPS_BACKEND_SESSION_SECRET must be set");
-    let api_path = format!("/{}", config.get_api_path());
-
     let backend = DpsBackend::new(config)?;
 
-    // Host-owned routes under the same namespace, with their own session middleware.
-    let host_api = Router::new()
-        .route("/profile", get(host_profile))
-        .layer(from_fn(create_session_middleware(session_secret)));
+    // Paths are relative to the API root; the session middleware is applied by the backend.
+    let host_api = Router::new().route("/profile", get(host_profile));
 
-    let host = Router::new()
-        .route("/", get(|| async { "OK" }))
-        .route("/health", get(|| async { "OK" }))
-        .nest(&api_path, host_api);
-
-    // Host layers are applied before this merge, keeping the two stacks separate.
-    let app = backend.enhance(host).await?;
+    let app = backend.enhance_api(host_api).await?;
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
@@ -273,8 +278,38 @@ async fn host_profile(
 ```
 
 > Host handlers can extract `Extension<SessionContext>` to read the validated session, exactly like the
-> backend's own handlers. The middleware is built from the same secret; creating a second instance is
-> intentional and cheap (the secret is a 32-byte copy).
+> backend's own handlers.
+
+## Frontend
+
+The Vue 3 frontend lives in [`frontend/`](./frontend) and is served by the backend as an Inertia.js
+monolith. Pages are declared in `src/handlers/pages.rs` and mounted in `DpsBackend::build_root`;
+component files live under `frontend/src/Pages/`, with shared shells in `frontend/src/Layouts/`.
+
+Auth is client-side: the Inertia page shell carries no auth, and the Vue app resolves the session by
+calling `GET /{api_path}/auth/me`. The session cookie stays `HttpOnly` and scoped to `Path=/{api_path}`,
+so it is sent on that request but is not readable by JavaScript.
+
+Commands (run inside `frontend/`):
+
+- **Install**: `bun install`
+- **Dev server**: `bun run dev` (port `5000`; writes `frontend/hot`)
+- **Build**: `bun run build` (writes `frontend/dist`, including `.vite/manifest.json`)
+
+Asset resolution:
+
+- **Dev** (`DPS_DEVELOPMENT_MODE=Y`): the backend reads `frontend/hot` (or falls back to
+  `DPS_BACKEND_FRONTEND_DEV_SERVER_URL`) and injects a module script tag pointing at the Vite dev
+  server. No `/build` static route is mounted.
+- **Prod**: the backend reads `frontend/dist/.vite/manifest.json`, injects the hashed
+  `/{base}{file}` script and CSS links into the root document, and serves `frontend/dist` under
+  `/build`.
+
+To add a page:
+
+1. Create `frontend/src/Pages/<Name>.vue`.
+2. Add a route/handler in `src/handlers/pages.rs` and mount it in `DpsBackend::build_root`.
+3. Update the "Frontend pages" table above.
 
 ## Configuration
 
@@ -292,6 +327,14 @@ All configuration is loaded from environment variables via `DpsConfig::new()`:
 - `DPS_BACKEND_SQLITE_MAIN_POOL_SIZE`: Database connection pool size (default: 1)
 - `DPS_BACKEND_SESSION_SECRET`: 32-byte secret for session encryption (required)
 - `DPS_BACKEND_INSECURE_COOKIE`: Set to "Y" to enable insecure cookies (default: false)
+
+Frontend asset resolution (all optional):
+
+- `DPS_BACKEND_FRONTEND_BASE`: Prod asset URL prefix served by the backend (default: `/build/`)
+- `DPS_BACKEND_FRONTEND_DIST_PATH`: Directory containing the built Vite bundle (default: `frontend/dist`)
+- `DPS_BACKEND_FRONTEND_HOT_FILE_PATH`: Vite dev-server hot file (default: `frontend/hot`)
+- `DPS_BACKEND_FRONTEND_ENTRY`: Vite manifest entry key (default: `src/main.ts`)
+- `DPS_BACKEND_FRONTEND_DEV_SERVER_URL`: Dev server fallback when the hot file is absent (default: `http://localhost:5000`)
 
 The cookie domain is automatically derived as `.{domain}` (e.g., ".dps.localhost").
 The cookie path is set to the `api_path` configuration with a leading slash (e.g., "/api").
@@ -321,8 +364,9 @@ the example host binary:
 cargo run --bin run_local_server
 ```
 
-The example host (`scripts/run_local_server.rs`) owns `GET /`, `GET /health`, the fallback handler,
-`axum::serve`, and graceful shutdown.
+The example host (`scripts/run_local_server.rs`) contributes no API routes of its own; it calls
+`enhance_api(Router::new())`, owns `axum::serve`, and handles graceful shutdown. The backend owns `/`,
+`/health`, `/{api_path}`, and the fallback.
 
 ## Database Setup
 

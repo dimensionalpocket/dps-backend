@@ -1,14 +1,17 @@
 use crate::database::{DpsBackendDatabases, MainDatabase, SessionDatabase};
+use crate::frontend::{FrontendAssets, FrontendConfig};
 use axum::{
   middleware::from_fn,
   routing::{get, patch, post, put},
   Router,
 };
+use inertia_rs::axum::VersionLayer;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tower::ServiceBuilder;
 use tower_http::{
   cors::CorsLayer,
+  services::ServeDir,
   trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
@@ -18,6 +21,7 @@ use tracing::Level;
 pub struct AppState {
   pub databases: DpsBackendDatabases,
   pub config: Arc<dps_config::DpsConfig>,
+  pub frontend: Arc<FrontendAssets>,
 }
 
 /// Embeddable backend that enhances a host-provided `axum::Router` with the
@@ -29,6 +33,7 @@ pub struct AppState {
 pub struct DpsBackend {
   pub(crate) config: Arc<dps_config::DpsConfig>,
   databases: OnceCell<DpsBackendDatabases>,
+  frontend_config: FrontendConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,10 +104,22 @@ impl DpsBackend {
       });
     }
 
+    let frontend_config = FrontendConfig::from_env(dps_config.get_development_mode());
+
     Ok(DpsBackend {
       config: Arc::new(dps_config),
       databases: OnceCell::new(),
+      frontend_config,
     })
+  }
+
+  /// Override the frontend asset configuration.
+  ///
+  /// Useful for tests and API-only deployments that do not ship a frontend
+  /// build.
+  pub fn with_frontend_config(mut self, config: FrontendConfig) -> Self {
+    self.frontend_config = config;
+    self
   }
 
   /// Returns the shared [`DpsBackendDatabases`] instance used by the backend.
@@ -151,14 +168,26 @@ impl DpsBackend {
       .await
   }
 
-  /// Build the backend's own routes, generic over the host router's state type.
+  /// Build the full root router.
   ///
-  /// The returned router is nested under `/{api_path}` and owns its session,
-  /// request-id, tracing, and CORS middleware. It does not bind a port.
-  pub async fn routes<S>(&self) -> Result<Router<S>, DpsBackendError>
-  where
-    S: Clone + Send + Sync + 'static,
-  {
+  /// The backend owns `/health`, the Inertia page routes at `/`, the REST API
+  /// under `/{api_path}`, and the root fallback. The returned router is not
+  /// bound to a port; the host calls `axum::serve`.
+  pub async fn routes(&self) -> Result<Router, DpsBackendError> {
+    self.build_root(Router::new()).await
+  }
+
+  /// Merge host routes (paths relative to the API root, e.g. `/reports`) into
+  /// the backend's `{api_path}` router, then return the full root router.
+  ///
+  /// Host routes inherit the backend's session, request-id, tracing, and CORS
+  /// layers. The host must not redefine an exact backend method + path, which
+  /// panics on merge.
+  pub async fn enhance_api(&self, host_api: Router<AppState>) -> Result<Router, DpsBackendError> {
+    self.build_root(host_api).await
+  }
+
+  async fn build_root(&self, host_api: Router<AppState>) -> Result<Router, DpsBackendError> {
     let state = self.initialize_state().await?;
     let api_path = format!("/{}", self.config.get_api_path());
 
@@ -168,59 +197,12 @@ impl DpsBackend {
       },
     )?;
 
-    let api = Router::new()
-      .route(
-        "/server-timestamp",
-        get(crate::handlers::system::server_timestamp),
-      )
-      .route("/auth/register", post(crate::handlers::auth::register))
-      .route("/auth/login", post(crate::handlers::auth::login))
-      .route("/auth/logout", post(crate::handlers::auth::logout))
-      .route(
-        "/auth/password",
-        patch(crate::handlers::auth::change_password),
-      )
-      .route("/auth/me", get(crate::handlers::auth::me))
-      .route(
-        "/sites",
-        get(crate::handlers::sites::list).post(crate::handlers::sites::create),
-      )
-      .route(
-        "/sites/{id}",
-        get(crate::handlers::sites::show)
-          .patch(crate::handlers::sites::update)
-          .delete(crate::handlers::sites::remove),
-      )
-      .route("/users", get(crate::handlers::users::list))
-      .route(
-        "/users/{id}",
-        get(crate::handlers::users::show)
-          .patch(crate::handlers::users::update)
-          .delete(crate::handlers::users::remove),
-      )
-      .route(
-        "/roles",
-        get(crate::handlers::roles::list).post(crate::handlers::roles::create),
-      )
-      .route(
-        "/roles/{id}",
-        get(crate::handlers::roles::show)
-          .patch(crate::handlers::roles::update)
-          .delete(crate::handlers::roles::remove),
-      )
-      .route(
-        "/roles/{id}/default",
-        put(crate::handlers::roles::set_default),
-      )
-      .route(
-        "/role-permissions",
-        get(crate::handlers::roles::permissions),
-      )
-      // Session middleware applies to every backend route.
+    // REST + host routes, then shared layers.
+    let api = backend_api_router()
+      .merge(host_api)
       .layer(from_fn(
         crate::middleware::session::create_session_middleware(session_secret),
       ))
-      // Backend-only observability; intentionally not applied to host routes.
       .layer(
         ServiceBuilder::new()
           .layer(from_fn(
@@ -235,21 +217,48 @@ impl DpsBackend {
           .layer(CorsLayer::very_permissive()),
       );
 
-    Ok(Router::new().nest(&api_path, api).with_state(state))
-  }
+    let api = Router::new().nest(&api_path, api);
 
-  /// Enhance a host-provided router with the backend routes.
-  ///
-  /// The host is responsible for binding and serving the returned router. The
-  /// host may add its own routes under the backend's `{api_path}` namespace
-  /// (for example, to share the session cookie) as long as it does not redefine
-  /// an exact backend method + path, which panics on merge.
-  pub async fn enhance<S>(&self, router: Router<S>) -> Result<Router<S>, DpsBackendError>
-  where
-    S: Clone + Send + Sync + 'static,
-  {
-    let routes = self.routes::<S>().await?;
-    Ok(router.merge(routes))
+    // Inertia pages. Auth-agnostic shells: no session middleware, no shared props.
+    let frontend = state.frontend.clone();
+    let pages = Router::new()
+      .route("/", get(crate::handlers::pages::home))
+      .route("/login", get(crate::handlers::pages::login))
+      .route("/register", get(crate::handlers::pages::register))
+      .route("/login-success", get(crate::handlers::pages::login_success))
+      .route(
+        "/password-change",
+        get(crate::handlers::pages::password_change),
+      )
+      .route("/admin", get(crate::handlers::pages::admin_home))
+      .route("/admin/users", get(crate::handlers::pages::admin_users))
+      .route("/admin/sites", get(crate::handlers::pages::admin_sites))
+      .route(
+        "/admin/sites/new",
+        get(crate::handlers::pages::admin_sites_new),
+      )
+      .route(
+        "/admin/sites/{id}/edit",
+        get(crate::handlers::pages::admin_sites_edit),
+      )
+      .layer(VersionLayer::dynamic({
+        let frontend = frontend.clone();
+        move || frontend.version()
+      }));
+
+    let root = Router::new()
+      .route("/health", get(crate::handlers::system::health))
+      .merge(pages)
+      .merge(api)
+      .fallback(crate::handlers::pages::not_found);
+
+    let root = if self.frontend_config.dev_mode {
+      root
+    } else {
+      root.nest_service("/build", ServeDir::new(&self.frontend_config.dist_path))
+    };
+
+    Ok(root.with_state(state))
   }
 
   /// Returns a [`MainDatabase`] handle backed by the shared main connection
@@ -285,8 +294,62 @@ impl DpsBackend {
     Ok(AppState {
       databases: self.databases().await?.clone(),
       config: self.config.clone(),
+      frontend: Arc::new(FrontendAssets::load(self.frontend_config.clone())),
     })
   }
+}
+
+/// Backend REST routes, relative to the `{api_path}` root (declarations only;
+/// layers are applied by [`DpsBackend::build_root`]).
+fn backend_api_router() -> Router<AppState> {
+  Router::new()
+    .route(
+      "/server-timestamp",
+      get(crate::handlers::system::server_timestamp),
+    )
+    .route("/auth/register", post(crate::handlers::auth::register))
+    .route("/auth/login", post(crate::handlers::auth::login))
+    .route("/auth/logout", post(crate::handlers::auth::logout))
+    .route(
+      "/auth/password",
+      patch(crate::handlers::auth::change_password),
+    )
+    .route("/auth/me", get(crate::handlers::auth::me))
+    .route(
+      "/sites",
+      get(crate::handlers::sites::list).post(crate::handlers::sites::create),
+    )
+    .route(
+      "/sites/{id}",
+      get(crate::handlers::sites::show)
+        .patch(crate::handlers::sites::update)
+        .delete(crate::handlers::sites::remove),
+    )
+    .route("/users", get(crate::handlers::users::list))
+    .route(
+      "/users/{id}",
+      get(crate::handlers::users::show)
+        .patch(crate::handlers::users::update)
+        .delete(crate::handlers::users::remove),
+    )
+    .route(
+      "/roles",
+      get(crate::handlers::roles::list).post(crate::handlers::roles::create),
+    )
+    .route(
+      "/roles/{id}",
+      get(crate::handlers::roles::show)
+        .patch(crate::handlers::roles::update)
+        .delete(crate::handlers::roles::remove),
+    )
+    .route(
+      "/roles/{id}/default",
+      put(crate::handlers::roles::set_default),
+    )
+    .route(
+      "/role-permissions",
+      get(crate::handlers::roles::permissions),
+    )
 }
 
 #[cfg(test)]
@@ -294,19 +357,37 @@ mod tests {
   use dps_backend_test_macros::dps_backend_db_test;
 
   use super::*;
+  use crate::middleware::session::SessionContext;
   use axum::{
     body::Body,
     http::{Request, StatusCode},
+    Extension,
   };
-  use tempfile::NamedTempFile;
+  use std::fs;
+  use std::path::PathBuf;
+  use tempfile::{NamedTempFile, TempDir};
   use tower::ServiceExt;
+
+  fn dev_frontend_config() -> FrontendConfig {
+    FrontendConfig {
+      dev_mode: true,
+      base: "/build/".to_string(),
+      dist_path: PathBuf::from("frontend/dist"),
+      hot_file_path: PathBuf::from("frontend/does-not-exist-hot"),
+      entry: "src/main.ts".to_string(),
+      dev_server_url: "http://localhost:5000".to_string(),
+    }
+  }
 
   fn create_test_backend(db_path: &str) -> DpsBackend {
     let mut config = dps_config::DpsConfig::new();
     config.set_backend_session_secret(Some("a".repeat(32).as_str()));
     config.set_backend_sqlite_main_file_path(db_path);
     config.set_api_path("api");
-    DpsBackend::new(config).unwrap()
+    config.set_development_mode(true);
+    DpsBackend::new(config)
+      .unwrap()
+      .with_frontend_config(dev_frontend_config())
   }
 
   #[test]
@@ -427,25 +508,52 @@ mod tests {
     assert!(body_str.contains("timestamp"));
   }
 
+  async fn body_string(response: axum::response::Response) -> String {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+      .await
+      .unwrap();
+    String::from_utf8(bytes.to_vec()).unwrap()
+  }
+
   #[dps_backend_db_test]
-  async fn test_enhance_preserves_host_routes() {
+  async fn test_routes_serves_pages_api_health_and_fallback() {
     let temp_file = NamedTempFile::new().unwrap();
     let db_path = temp_file.path().to_str().unwrap();
 
     let backend = create_test_backend(db_path);
-    let host = Router::new()
-      .route("/", get(|| async { "OK" }))
-      .route("/health", get(|| async { "OK" }));
-    let app = backend.enhance(host).await.unwrap();
+    let app: Router = backend.routes().await.unwrap();
 
+    // Inertia page shell.
     let response = app
       .clone()
-      .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+      .oneshot(
+        Request::builder()
+          .uri("/login")
+          .body(Body::empty())
+          .unwrap(),
+      )
       .await
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    assert!(body_string(response).await.contains("data-page=\"app\""));
 
+    // REST JSON.
     let response = app
+      .clone()
+      .oneshot(
+        Request::builder()
+          .uri("/api/server-timestamp")
+          .body(Body::empty())
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(body_string(response).await.contains("timestamp"));
+
+    // Health check.
+    let response = app
+      .clone()
       .oneshot(
         Request::builder()
           .uri("/health")
@@ -455,20 +563,147 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_string(response).await, "OK");
+
+    // API fallback keeps plain text 404.
+    let response = app
+      .oneshot(
+        Request::builder()
+          .uri("/api/does-not-exist")
+          .body(Body::empty())
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(body_string(response).await, "NOT FOUND");
+  }
+
+  async fn host_reports(Extension(session): Extension<SessionContext>) -> &'static str {
+    if session.authenticated() {
+      "AUTHED"
+    } else {
+      "ANON"
+    }
   }
 
   #[dps_backend_db_test]
-  async fn test_enhance_adds_backend_routes() {
+  async fn test_enhance_api_mounts_host_routes_and_inherits_session() {
     let temp_file = NamedTempFile::new().unwrap();
     let db_path = temp_file.path().to_str().unwrap();
 
     let backend = create_test_backend(db_path);
-    let app = backend.enhance(Router::new()).await.unwrap();
+    backend.migrate_database().await.unwrap();
+    backend.seed_database().await.unwrap();
+
+    let host_api = Router::new().route("/reports", get(host_reports));
+    let app = backend.enhance_api(host_api).await.unwrap();
+
+    // Anonymous request: session context present but not authenticated.
+    let response = app
+      .clone()
+      .oneshot(
+        Request::builder()
+          .uri("/api/reports")
+          .body(Body::empty())
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_string(response).await, "ANON");
+
+    // Register to obtain a valid session cookie.
+    let body = serde_json::json!({
+      "username": "host_route_user",
+      "password": "password123",
+      "passwordConfirmation": "password123",
+    });
+    let response = app
+      .clone()
+      .oneshot(
+        Request::builder()
+          .method("POST")
+          .uri("/api/auth/register")
+          .header("content-type", "application/json")
+          .body(Body::from(body.to_string()))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let cookie = response
+      .headers()
+      .get("set-cookie")
+      .unwrap()
+      .to_str()
+      .unwrap()
+      .to_string();
+
+    // Authenticated request: host route sees the session cookie.
+    let response = app
+      .clone()
+      .oneshot(
+        Request::builder()
+          .uri("/api/reports")
+          .header("cookie", cookie)
+          .body(Body::empty())
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_string(response).await, "AUTHED");
+
+    // Host routes do not leak to the root.
+    let response = app
+      .oneshot(
+        Request::builder()
+          .uri("/reports")
+          .body(Body::empty())
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+  }
+
+  #[dps_backend_db_test]
+  #[should_panic]
+  async fn test_enhance_api_duplicate_path_panics() {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+
+    let backend = create_test_backend(db_path);
+    let host_api = Router::new().route("/auth/me", get(|| async { "duplicate" }));
+
+    let _ = backend.enhance_api(host_api).await;
+  }
+
+  #[dps_backend_db_test]
+  async fn test_static_assets_served_in_prod_mode() {
+    let temp_file = NamedTempFile::new().unwrap();
+    let db_path = temp_file.path().to_str().unwrap();
+
+    let dist = TempDir::new().unwrap();
+    fs::write(dist.path().join("app.js"), "console.log('hi')").unwrap();
+
+    let frontend_config = FrontendConfig {
+      dev_mode: false,
+      base: "/build/".to_string(),
+      dist_path: dist.path().to_path_buf(),
+      hot_file_path: PathBuf::from("frontend/does-not-exist-hot"),
+      entry: "src/main.ts".to_string(),
+      dev_server_url: "http://localhost:5000".to_string(),
+    };
+
+    let backend = create_test_backend(db_path).with_frontend_config(frontend_config);
+    let app = backend.routes().await.unwrap();
 
     let response = app
       .oneshot(
         Request::builder()
-          .uri("/api/server-timestamp")
+          .uri("/build/app.js")
           .body(Body::empty())
           .unwrap(),
       )
@@ -476,5 +711,6 @@ mod tests {
       .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_string(response).await, "console.log('hi')");
   }
 }

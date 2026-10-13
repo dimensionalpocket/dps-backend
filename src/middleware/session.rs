@@ -20,7 +20,7 @@ impl SessionContext {
 }
 
 /// Cookie name for session tokens
-pub const SESSION_COOKIE_NAME: &str = "DpsAuthSession";
+pub const SESSION_COOKIE_NAME: &str = "DpsSession";
 
 /// Create session middleware with the provided secret
 /// Returns a middleware function that can be used with axum
