@@ -104,7 +104,7 @@ impl DpsBackend {
       });
     }
 
-    let frontend_config = FrontendConfig::from_env(dps_config.get_development_mode());
+    let frontend_config = FrontendConfig::main(dps_config.get_development_mode());
 
     Ok(DpsBackend {
       config: Arc::new(dps_config),

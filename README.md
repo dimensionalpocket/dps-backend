@@ -6,7 +6,7 @@ An opinionated authentication, user management, and session handling backend, pa
 composable: it serves an [Inertia.js](https://inertiajs.com/) Vue frontend from the root path `/`, owns
 the `/health` endpoint, and exposes a REST API under `/{api_path}`.
 
-It is intended to be deployed as a service with a volume to house the SQLite databases, but it can also
+It can be deployed on its own as a service with a volume to house the SQLite databases, but it can also
 be embedded into a larger `axum` application. The library **never binds a socket**: the host owns
 `axum::serve` and graceful shutdown. A host can merge its own API routes into the `{api_path}` namespace
 via `DpsBackend::enhance_api`, and those routes inherit the backend's session, request-id, tracing, and
@@ -298,9 +298,9 @@ Commands (run inside `frontend/`):
 
 Asset resolution:
 
-- **Dev** (`DPS_DEVELOPMENT_MODE=Y`): the backend reads `frontend/hot` (or falls back to
-  `DPS_BACKEND_FRONTEND_DEV_SERVER_URL`) and injects a module script tag pointing at the Vite dev
-  server. No `/build` static route is mounted.
+- **Dev** (`DPS_DEVELOPMENT_MODE=Y`): the backend reads `frontend/hot` (or falls back to its hardcoded
+  `http://localhost:5000` default) and injects a module script tag pointing at the Vite dev server. No
+  `/build` static route is mounted.
 - **Prod**: the backend reads `frontend/dist/.vite/manifest.json`, injects the hashed
   `/{base}{file}` script and CSS links into the root document, and serves `frontend/dist` under
   `/build`.
@@ -328,13 +328,9 @@ All configuration is loaded from environment variables via `DpsConfig::new()`:
 - `DPS_BACKEND_SESSION_SECRET`: 32-byte secret for session encryption (required)
 - `DPS_BACKEND_INSECURE_COOKIE`: Set to "Y" to enable insecure cookies (default: false)
 
-Frontend asset resolution (all optional):
-
-- `DPS_BACKEND_FRONTEND_BASE`: Prod asset URL prefix served by the backend (default: `/build/`)
-- `DPS_BACKEND_FRONTEND_DIST_PATH`: Directory containing the built Vite bundle (default: `frontend/dist`)
-- `DPS_BACKEND_FRONTEND_HOT_FILE_PATH`: Vite dev-server hot file (default: `frontend/hot`)
-- `DPS_BACKEND_FRONTEND_ENTRY`: Vite manifest entry key (default: `src/main.ts`)
-- `DPS_BACKEND_FRONTEND_DEV_SERVER_URL`: Dev server fallback when the hot file is absent (default: `http://localhost:5000`)
+Frontend asset resolution (asset base, dist path, hot file, entry, and dev-server URL) is fixed in code
+and coupled to the frontend build; it is not configurable via environment variables. Embedders can
+override it programmatically with `DpsBackend::with_frontend_config`.
 
 The cookie domain is automatically derived as `.{domain}` (e.g., ".dps.localhost").
 The cookie path is set to the `api_path` configuration with a leading slash (e.g., "/api").

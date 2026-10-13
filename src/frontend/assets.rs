@@ -2,12 +2,11 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Environment variable prefix used by the frontend assets configuration.
-fn env_or(key: &str, default: &str) -> String {
-  std::env::var(key).unwrap_or_else(|_| default.to_string())
-}
-
 /// Configuration for resolving the Vite frontend assets.
+///
+/// Values are fixed per app and coupled to the frontend build; embedders and
+/// tests override fields programmatically via `DpsBackend::with_frontend_config`.
+/// `dev_mode` is sourced from `DpsConfig::get_development_mode()`.
 #[derive(Debug, Clone)]
 pub struct FrontendConfig {
   pub dev_mode: bool,
@@ -24,17 +23,15 @@ pub struct FrontendConfig {
 }
 
 impl FrontendConfig {
-  pub fn from_env(dev_mode: bool) -> Self {
+  /// Defaults for the main frontend app.
+  pub fn main(dev_mode: bool) -> Self {
     Self {
       dev_mode,
-      base: env_or("DPS_BACKEND_FRONTEND_BASE", "/build/"),
-      dist_path: PathBuf::from(env_or("DPS_BACKEND_FRONTEND_DIST_PATH", "frontend/dist")),
-      hot_file_path: PathBuf::from(env_or("DPS_BACKEND_FRONTEND_HOT_FILE_PATH", "frontend/hot")),
-      entry: env_or("DPS_BACKEND_FRONTEND_ENTRY", "src/main.ts"),
-      dev_server_url: env_or(
-        "DPS_BACKEND_FRONTEND_DEV_SERVER_URL",
-        "http://localhost:5000",
-      ),
+      base: "/build/".to_string(),
+      dist_path: PathBuf::from("frontend/dist"),
+      hot_file_path: PathBuf::from("frontend/hot"),
+      entry: "src/main.ts".to_string(),
+      dev_server_url: "http://localhost:5000".to_string(),
     }
   }
 }
@@ -176,23 +173,15 @@ mod tests {
 
   fn dev_config(hot_file_path: PathBuf) -> FrontendConfig {
     FrontendConfig {
-      dev_mode: true,
-      base: "/build/".to_string(),
-      dist_path: PathBuf::from("frontend/dist"),
       hot_file_path,
-      entry: "src/main.ts".to_string(),
-      dev_server_url: "http://localhost:5000".to_string(),
+      ..FrontendConfig::main(true)
     }
   }
 
   fn prod_config(dist_path: PathBuf) -> FrontendConfig {
     FrontendConfig {
-      dev_mode: false,
-      base: "/build/".to_string(),
       dist_path,
-      hot_file_path: PathBuf::from("frontend/hot"),
-      entry: "src/main.ts".to_string(),
-      dev_server_url: "http://localhost:5000".to_string(),
+      ..FrontendConfig::main(false)
     }
   }
 
